@@ -684,6 +684,198 @@ def _league_easy(pool: list[dict], famous: list[dict], limit: int = 150) -> list
     return picked[:limit] or pool
 
 
+VALORANT_POPULAR_LIMIT = 150
+VALORANT_STATUS_CN = {"现役": "现役", "下放或替补": "自由人/替补", "退役": "退役", "未知": "未知"}
+
+
+def _valorant_status(player: dict) -> str:
+    """展示用的身份：自由人单独标出来。"""
+    status = player.get("_status") or "未知"
+    if status == "下放或替补" and player.get("freeAgent"):
+        return "自由人"
+    if status == "下放或替补":
+        return "下放或替补"
+    return VALORANT_STATUS_CN.get(status, status)
+
+
+def _valorant_popular(players: list[dict], limit: int = VALORANT_POPULAR_LIMIT) -> list[dict]:
+    """热门档：站点热门池里的退役/自由人全收，其余按站点热度分补到 limit 人。"""
+    pool = [p for p in players if p.get("popular")]
+    must = [p for p in pool if p.get("_status") == "退役" or p.get("freeAgent")]
+    rest = sorted(
+        (p for p in pool if p not in must),
+        key=lambda p: (
+            -int(p.get("popularScore") or 0),
+            -int(p.get("championsTitle") or 0),
+            -int(p.get("mastersTitle") or 0),
+            -int(p.get("championsApp") or 0),
+            -int(p.get("mastersApp") or 0),
+            p["gameId"].lower(),
+        ),
+    )
+    picked = must + rest[: max(0, limit - len(must))]
+    return picked[:limit] or pool
+
+
+class ValorantTheme(Theme):
+    """瓦罗兰特（无畏契约）职业选手，数据来自 wayiba.com。"""
+
+    key = "valorant"
+    command = "瓦一把"
+    aliases = ("猜瓦", "瓦罗兰特", "valorant")
+    label = "瓦罗兰特选手"
+    icon = "🎯"
+    db_file = "valorant_players.json"
+    attempts = 8
+    rows = ((0, 1, 2), (3, 4, 5), (6, 7), (8, 9))
+    default_pool = "easy"
+    pool_alias = {
+        "易": "easy", "简单": "easy", "热门": "easy", "easy": "easy",
+        "中": "normal", "普通": "normal", "标准": "normal", "normal": "normal",
+        "难": "hard", "全部": "hard", "全量": "hard", "地狱": "hard", "hard": "hard",
+    }
+    difficulty_hint = "易 / 中 / 难"
+
+    def load(self, raw: Any) -> list[dict]:
+        players = raw.get("players") if isinstance(raw, dict) else raw
+        out = []
+        for p in players or []:
+            if not p.get("gameId"):
+                continue
+            p = dict(p)
+            p["_roles"] = _as_list(p.get("roles"))
+            p["_team"] = str(p.get("team") or "无队伍")
+            p["_tier"] = str(p.get("teamTier") or "")
+            p["_status"] = str(p.get("status") or "未知")
+            out.append(p)
+        return out
+
+    def keys_of(self, player: dict) -> set[str]:
+        keys = {player.get("gameId", ""), player.get("cnName", ""), player.get("realName", "")}
+        keys.update(player.get("aliases") or [])
+        return {k for k in keys if k}
+
+    def title_of(self, player: dict) -> str:
+        return player["gameId"]
+
+    def pools(self, players: list[dict]) -> dict[str, list[dict]]:
+        hot = _valorant_popular(players)
+        intl = [
+            p
+            for p in players
+            if (p.get("mastersApp") or 0) > 0 or (p.get("championsApp") or 0) > 0
+        ]
+        return {
+            "easy": hot or players,
+            "normal": intl or players,
+            "hard": players,
+        }
+
+    def pool_label(self, pool: str) -> str:
+        return {
+            "easy": "易（热门 150 人，含退役与自由人）",
+            "normal": "中（有国际赛履历）",
+            "hard": "难（全部选手，含退役）",
+        }.get(pool, pool)
+
+    @staticmethod
+    def _identity_state(player: dict) -> tuple[str, str]:
+        status = player.get("_status") or "未知"
+        if status == "退役":
+            return status, ""
+        return status, player.get("_tier") or ""
+
+    def judge(self, guess: dict, target: dict) -> list[Cell]:
+        cells: list[Cell] = []
+
+        # 国籍：相同一致；不同但同大洲接近
+        g_nat, t_nat = guess.get("nationality", "—"), target.get("nationality", "—")
+        if g_nat == t_nat and g_nat != "未知":
+            cells.append(Cell("国籍", g_nat, "correct"))
+        elif guess.get("continent") and guess.get("continent") == target.get("continent"):
+            cells.append(Cell("国籍", g_nat, "close"))
+        else:
+            cells.append(Cell("国籍", g_nat, "wrong"))
+
+        # 赛区：只有一致 / 不一致
+        g_region, t_region = guess.get("region", "—"), target.get("region", "—")
+        cells.append(Cell("赛区", g_region, "correct" if g_region == t_region else "wrong"))
+
+        # 战队：相同一致；不同但同赛区接近
+        g_team, t_team = guess.get("_team", "无队伍"), target.get("_team", "无队伍")
+        if g_team == t_team:
+            cells.append(Cell("战队", g_team, "correct"))
+        elif g_region == t_region:
+            cells.append(Cell("战队", g_team, "close"))
+        else:
+            cells.append(Cell("战队", g_team, "wrong"))
+
+        # 身份：状态 + 是否一线队，两项都对才算一致，对一项算接近
+        g_state, t_state = self._identity_state(guess), self._identity_state(target)
+        if "退役" in (g_state[0], t_state[0]):
+            level = "correct" if g_state[0] == t_state[0] else "wrong"
+        else:
+            hits = int(g_state[0] == t_state[0]) + int(bool(g_state[1]) and g_state[1] == t_state[1])
+            level = "correct" if hits == 2 else ("close" if hits == 1 else "wrong")
+        cells.append(Cell("身份", _valorant_status(guess), level))
+
+        # 职责：集合相同一致，有交集接近
+        g_roles = set(guess.get("_roles") or [])
+        t_roles = set(target.get("_roles") or [])
+        if g_roles and g_roles == t_roles:
+            level = "correct"
+        elif g_roles & t_roles:
+            level = "close"
+        else:
+            level = "wrong"
+        cells.append(Cell("职责", "/".join(guess.get("_roles") or ["—"]), level))
+
+        # 年龄：只比大小
+        cells.append(_diff_cell("年龄", int(guess.get("age") or 0), int(target.get("age") or 0), 0))
+        # 大师赛参赛 ±2，冠军赛参赛 ±1
+        cells.append(_diff_cell("大师赛参赛", int(guess.get("mastersApp") or 0), int(target.get("mastersApp") or 0), 2))
+        cells.append(
+            _diff_cell("冠军赛参赛", int(guess.get("championsApp") or 0), int(target.get("championsApp") or 0), 1)
+        )
+        # 冠军数必须一致
+        cells.append(_diff_cell("大师赛冠军", int(guess.get("mastersTitle") or 0), int(target.get("mastersTitle") or 0), 0))
+        cells.append(
+            _diff_cell("冠军赛冠军", int(guess.get("championsTitle") or 0), int(target.get("championsTitle") or 0), 0)
+        )
+        return cells
+
+    def card(self, player: dict) -> str:
+        title = player["gameId"]
+        extra = player.get("cnName") or player.get("realName") or ""
+        head = f"📇 {title}（{extra}，{_valorant_status(player)}）" if extra else f"📇 {title}（{_valorant_status(player)}）"
+        facts = [
+            player.get("_team") or "",
+            player.get("region") or "",
+            "/".join(player.get("_roles") or ["—"]),
+            f"{player.get('age', '—')} 岁",
+        ]
+        honors = []
+        if player.get("mastersTitle"):
+            honors.append(f"大师赛冠军 {player['mastersTitle']}")
+        if player.get("championsTitle"):
+            honors.append(f"冠军赛冠军 {player['championsTitle']}")
+        body = " · ".join(x for x in facts if x)
+        if honors:
+            body += "\n" + " · ".join(honors)
+        return f"{head}\n{body}"
+
+    def hints(self, player: dict) -> list[tuple[str, str]]:
+        return [
+            ("职责", "/".join(player.get("_roles") or ["—"])),
+            ("赛区", player.get("region") or "—"),
+            ("国籍", player.get("nationality") or "—"),
+            ("年龄", f"{player.get('age', '—')} 岁"),
+            ("身份", _valorant_status(player)),
+            ("大师赛参赛", f"{player.get('mastersApp', 0)} 次"),
+            ("冠军赛参赛", f"{player.get('championsApp', 0)} 次"),
+        ]
+
+
 def _cs_fame_score(player: dict) -> tuple:
     """CS 选手的「火」程度：Major 冠军 > 出场数 > 现役 > 是否在名人名单。"""
     return (
@@ -720,7 +912,9 @@ def _as_list(value: Any) -> list[str]:
     return []
 
 
-THEMES: dict[str, Theme] = {t.key: t for t in (CSTheme(), FootballTheme(), LolTheme())}
+THEMES: dict[str, Theme] = {
+    t.key: t for t in (CSTheme(), FootballTheme(), LolTheme(), ValorantTheme())
+}
 
 
 # ============================================================
@@ -926,7 +1120,7 @@ _BARE_COMMANDS = {
 class GuessProPlugin(Star):
     """猜选手 · 多题库
 
-    群里发「弗一把」/「足一把」/「撸一把」开局，然后直接发选手名开猜。
+    群里发「弗一把」/「足一把」/「撸一把」/「瓦一把」开局，然后直接发选手名开猜。
     """
 
     def __init__(self, context: Context, config: AstrBotConfig | None = None) -> None:
@@ -1346,6 +1540,15 @@ class GuessProPlugin(Star):
             return
         args = self._args_after_command(event, THEMES["lol"]) or difficulty
         yield event.chain_result(self._with_at(event, self._begin(event, "lol", args)))
+        event.stop_event()
+
+    @filter.command("瓦一把", alias={"猜瓦", "瓦罗兰特", "valorant"})
+    async def start_valorant(self, event: AstrMessageEvent, difficulty: str = ""):
+        """瓦罗兰特选手猜谜"""
+        if not self._session_ok(event):
+            return
+        args = self._args_after_command(event, THEMES["valorant"]) or difficulty
+        yield event.chain_result(self._with_at(event, self._begin(event, "valorant", args)))
         event.stop_event()
 
     @filter.command("提示", alias={"线索"})

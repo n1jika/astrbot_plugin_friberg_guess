@@ -15,3 +15,6 @@ data/.lol_crawl_state.json
 
 # Liquipedia 抓取缓存
 data/.lol_liquipedia_cache.json
+
+# 瓦一把原始数据缓存
+data/.valorant_source_cache.json

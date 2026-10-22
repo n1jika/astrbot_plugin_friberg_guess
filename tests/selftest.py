@@ -510,6 +510,83 @@ async def main() -> None:
         await fb2.on_message(ev_lol_out)
         check(ev_lol_out.results and "第 1/" in _flatten(ev_lol_out.results[0]), "LoL 池外选手能正常猜")
 
+    print("[17] 瓦一把（wayiba）")
+    v_theme = m.THEMES["valorant"]
+    vdb = m.PlayerDB(v_theme, ROOT / "data" / "valorant_players.json")
+    check(len(vdb.players) == 543, f"瓦一把题库 543 人（{len(vdb.players)}）")
+    check(v_theme.pool_label("easy").startswith("易（热门 150 人"), "瓦一把易档写明热门 150 人")
+    hot_v = vdb.pool("easy")
+    check(len(hot_v) == 150, f"瓦一把易档正好 150 人（{len(hot_v)}）")
+    check(vdb.pool_size("normal") == 314 and vdb.pool_size("hard") == 541, "瓦一把中/难两档人数")
+
+    statuses = [m._valorant_status(p) for p in hot_v]
+    check(statuses.count("退役") >= 15, f"易档含退役 {statuses.count('退役')} 人")
+    check(statuses.count("自由人") >= 5, f"易档含自由人 {statuses.count('自由人')} 人")
+    hot_names_v = {p["gameId"] for p in hot_v}
+    for star in ("TenZ", "ZmjjKK", "Boaster", "Derke", "aspas"):
+        check(star in hot_names_v, f"易档包含 {star}")
+
+    check([p["gameId"] for p in vdb.find("郑永康")] == ["ZmjjKK"], "中文名能查到 ZmjjKK")
+    check([p["gameId"] for p in vdb.find("KK")] == ["ZmjjKK"], "别名 KK 能查到 ZmjjKK")
+
+    # 判定规则逐条核对
+    raw_v = {
+        "players": [
+            {"gameId": "A", "nationality": "中国", "continent": "亚洲", "region": "VCT CN",
+             "team": "EDward Gaming", "teamTier": "一线", "status": "现役", "roles": ["决斗"],
+             "age": 22, "mastersApp": 4, "mastersTitle": 1, "championsApp": 2, "championsTitle": 1},
+            {"gameId": "B", "nationality": "韩国", "continent": "亚洲", "region": "VCT CN",
+             "team": "Trace Esports", "teamTier": "一线", "status": "现役", "roles": ["决斗", "先锋"],
+             "age": 25, "mastersApp": 6, "mastersTitle": 0, "championsApp": 3, "championsTitle": 0},
+            {"gameId": "C", "nationality": "巴西", "continent": "南美洲", "region": "VCT Americas",
+             "team": "LOUD", "teamTier": "非一线", "status": "退役", "roles": ["控场"],
+             "age": 30, "mastersApp": 1, "mastersTitle": 0, "championsApp": 1, "championsTitle": 0},
+        ]
+    }
+    va, vb, vc = v_theme.load(raw_v)
+    cells = {c.label: (c.value, c.level) for c in v_theme.judge(va, vb)}
+    check(cells["国籍"][1] == "close", "同大洲不同国籍 → 黄")
+    check(cells["赛区"][1] == "correct", "同赛区 → 绿")
+    check(cells["战队"][1] == "close", "不同队但同赛区 → 黄")
+    check(cells["身份"][1] == "correct", "现役 + 一线队都相同 → 绿")
+    check(cells["职责"][1] == "close", "职责有交集 → 黄")
+    check(cells["年龄"][1] == "wrong" and cells["年龄"][0].endswith("↑"), "年龄不同 → 红 + 更大")
+    check(cells["大师赛参赛"][1] == "close", "大师赛参赛差 2 → 黄")
+    check(cells["冠军赛参赛"][1] == "close", "冠军赛参赛差 1 → 黄")
+    check(cells["大师赛冠军"][1] == "wrong", "冠军数不同 → 红")
+    cross = {c.label: (c.value, c.level) for c in v_theme.judge(va, vc)}
+    check(cross["国籍"][1] == "wrong", "不同大洲 → 红")
+    check(cross["赛区"][1] == "wrong", "不同赛区 → 红")
+    check(cross["战队"][1] == "wrong", "不同赛区不同队 → 红")
+    check(cross["身份"][1] == "wrong", "现役 vs 退役 → 红")
+    check(all(c.level == "correct" for c in v_theme.judge(va, va)), "自己猜自己全绿")
+
+    # 整局：答案来自 150 人池，池外选手照样能猜
+    v_plugin = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    v_targets = set()
+    for i in range(15):
+        uid = f"v-{i}"
+        await run_commands(v_plugin.start_valorant, FakeEvent(group="72000", user=uid), "")
+        g_ = v_plugin.games.get(m.SessionKey.game("72000", uid, "valorant"))
+        if g_:
+            v_targets.add(g_.target)
+    check(v_targets <= hot_names_v, f"瓦一把 15 局答案都来自 150 人池（{len(v_targets)} 个不同答案）")
+
+    v_out = [p for p in vdb.players if p["gameId"] not in hot_names_v]
+    check(len(v_out) == 393, f"瓦一把池外仍有 393 人可猜（{len(v_out)}）")
+    ev_v_out = FakeEvent(text=v_out[0]["gameId"], group="72000", user="v-out", name="池外")
+    await run_commands(v_plugin.start_valorant, FakeEvent(group="72000", user="v-out"), "")
+    await v_plugin.on_message(ev_v_out)
+    check(ev_v_out.results and "第 1/8" in _flatten(ev_v_out.results[0]), "瓦一把池外选手能正常猜")
+
+    ev_v_direct = FakeEvent(text="瓦一把 难", group="72001", user="v2")
+    await v_plugin.on_message(ev_v_direct)
+    g_v = v_plugin.games.get(m.SessionKey.game("72001", "v2", "valorant"))
+    check(g_v is not None and g_v.pool == "hard", "瓦一把 难 切到全库")
+
+    # 未知题库文件缺失时不影响其它题库
+    check("valorant" in m.THEMES and m.THEMES["valorant"].command == "瓦一把", "主题已注册")
+
     print("\n全部自测通过 ✅")
     print("足球棋盘示例：\n" + m.render_board(fbt, 1, 10, haaland, rodri))
 
