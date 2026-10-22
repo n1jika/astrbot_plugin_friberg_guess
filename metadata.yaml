@@ -5,8 +5,9 @@ desc: >-
   CS:GO / CS2 Major 选手猜谜游戏（类 Wordle）。每人独立对局，每猜一位选手会按
   国家/地区、赛区、战队、年龄、位置、Major 冠军数、Major 出场数、现役状态八项给出
   逐条反馈，8 次机会内猜中即胜。内置 646 位 Major 选手库，支持三档难度、提示、战绩与群排行。
-version: 1.0.0
-author: 小布
+version: 1.0.1
+author: weadee
+repo: https://github.com/weadee/astrbot_plugin_friberg_guess
 astrbot_version: ">=4.9.2"
 support_platforms:
   - aiocqhttp

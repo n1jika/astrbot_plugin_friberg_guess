@@ -4,6 +4,8 @@
 **国家 / 赛区 / 战队 / 年龄 / 位置 / Major 冠军数 / Major 出场数 / 现役状态** 八项给出
 `🟩 一致`、`🟨 接近`、`🟥 不符` 的反馈，8 次机会内猜中即胜。
 
+仓库地址：<https://github.com/weadee/astrbot_plugin_friberg_guess>
+
 灵感来自 [弗一把 csgofriberg](https://shnlfriberg.online)（开源 AGPL-3.0），本插件为独立实现，
 未复制其源码，仅对齐了判定规则与属性口径。
 
@@ -69,6 +71,12 @@ Bot ：第 1/8 猜｜s1mple
 1. 把整个 `astrbot_plugin_friberg_guess` 文件夹放进 `AstrBot/data/plugins/`；
 2. 在 WebUI「插件管理」里点重载（或重启 AstrBot）；
 3. 插件配置里可调次数、限时、难度、提示开关。
+
+也可以在 WebUI 的插件页填入仓库地址安装，后续能直接在面板里更新：
+
+```
+https://github.com/weadee/astrbot_plugin_friberg_guess
+```
 
 无第三方依赖，纯标准库。
 
