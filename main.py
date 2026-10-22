@@ -738,6 +738,7 @@ class PlayerDB:
         self.players: list[dict] = []
         self._index: dict[str, list[dict]] = {}
         self._pools: dict[str, list[dict]] = {}
+        self._ambiguous: set[str] = set()
         self.load()
 
     def load(self) -> None:
@@ -756,7 +757,16 @@ class PlayerDB:
                 if normalized:
                     self._index.setdefault(normalized, []).append(player)
         self._pools = self.theme.pools(self.players)
-        logger.info(f"[{PLUGIN_NAME}] {self.theme.label}题库加载 {len(self.players)} 人（{self.version or '未知版本'}）")
+        # 同名选手（如 LoL 里两个 Ace）不能当答案：否则猜中了也可能判到另一个人身上
+        counter: dict[str, int] = {}
+        for player in self.players:
+            title = self.theme.title_of(player)
+            counter[title] = counter.get(title, 0) + 1
+        self._ambiguous = {title for title, n in counter.items() if n > 1}
+        logger.info(
+            f"[{PLUGIN_NAME}] {self.theme.label}题库加载 {len(self.players)} 人（{self.version or '未知版本'}）"
+            + (f"，其中 {len(self._ambiguous)} 个同名不参与出题" if self._ambiguous else "")
+        )
 
     @staticmethod
     def _prominence(player: dict) -> tuple:
@@ -772,7 +782,8 @@ class PlayerDB:
         return players or self.players
 
     def pool_size(self, name: str) -> int:
-        return len(self.pool(name))
+        """开局文案里的人数：按真正能出题的候选算（同名选手已排除）。"""
+        return len(self.answer_pool(name))
 
     def match(self, query: str) -> tuple[str, list[dict]]:
         """检索，返回 (匹配类型, 候选)。类型：exact / prefix / contains / none。"""
@@ -798,6 +809,10 @@ class PlayerDB:
 
     def find(self, query: str) -> list[dict]:
         return self.match(query)[1]
+
+    def answer_pool(self, name: str) -> list[dict]:
+        """出题候选：去掉同名选手，保证答案能被唯一判定。"""
+        return [p for p in self.pool(name) if self.theme.title_of(p) not in self._ambiguous]
 
     def get(self, title: str) -> dict | None:
         for player in self.players:
@@ -1142,8 +1157,9 @@ class GuessProPlugin(Star):
             return f"{theme.command}的难度只有：{theme.difficulty_hint}。"
         if not db.pool(pool):
             pool = theme.default_pool
+        candidates = db.answer_pool(pool) or db.pool(pool)
 
-        target = random.choice(db.pool(pool))
+        target = random.choice(candidates)
         attempts = self._attempts(theme)
         game = Game(
             key=gkey,

@@ -461,6 +461,55 @@ async def main() -> None:
     await fb_plugin.on_message(ev_out)
     check(ev_out.results and "第 1/" in _flatten(ev_out.results[0]), f"池外选手 {outside[0]} 能正常猜")
 
+    print("[16] 足一把 / 撸一把 同样是「答案在池内、题库全可猜」")
+    fb2 = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    fb2.dbs["lol"] = m.PlayerDB(m.THEMES["lol"], Path(__file__).resolve().parent.parent / "data" / "lol_players.json")
+
+    # 足一把：默认答案池 300，题库 1141
+    fdb = fb2.dbs["football"]
+    check(len(fdb.players) == 1141, f"足球题库仍是 1141 人（{len(fdb.players)}）")
+    fb_targets = set()
+    for i in range(20):
+        uid = f"fb-pool-{i}"
+        await run_commands(fb2.start_football, FakeEvent(group="71000", user=uid), "")
+        g_ = fb2.games.get(m.SessionKey.game("71000", uid, "football"))
+        if g_:
+            fb_targets.add(g_.target)
+    fb_pool = {fdb.theme.title_of(p) for p in fdb.answer_pool("all:easy")}
+    check(len(fb_pool) == 300 and fb_targets <= fb_pool, f"足球 20 局答案都来自 300 人池（{len(fb_pool)}）")
+
+    fb_out = [p for p in fdb.players if fdb.theme.title_of(p) not in fb_pool]
+    check(len(fb_out) == 841, f"足球池外仍有 841 人可猜（{len(fb_out)}）")
+    ev_fb_out = FakeEvent(text=fb_out[0]["name"], group="71000", user="fb-out", name="池外")
+    await run_commands(fb2.start_football, FakeEvent(group="71000", user="fb-out"), "")
+    await fb2.on_message(ev_fb_out)
+    check(ev_fb_out.results and "第 1/" in _flatten(ev_fb_out.results[0]), f"足球池外 {fb_out[0]['cnName']} 能正常猜")
+
+    # 开局文案里的人数必须是「真正能出题」的数量
+    for key_, db_ in (("cs", fb2.dbs["cs"]), ("football", fdb)):
+        check(db_.pool_size("easy") == len(db_.answer_pool("easy")), f"{key_} 显示人数=可出题数")
+    # 撸一把：题库 2427，同名选手不作为答案
+    ldb = fb2.dbs["lol"]
+    if ldb.players:
+        check(ldb.pool_size("easy") == len(ldb.answer_pool("easy")), "LoL 显示人数=可出题数")
+        check(len(ldb.players) == 2427, f"LoL 题库仍是 2427 人（{len(ldb.players)}）")
+        check(len(ldb._ambiguous) == 16, f"LoL 有 16 个同名标题（{len(ldb._ambiguous)}）")
+        lol_pool = {ldb.theme.title_of(p) for p in ldb.answer_pool("easy")}
+        check(not (lol_pool & ldb._ambiguous), "同名选手不会成为答案")
+        lol_targets = set()
+        for i in range(20):
+            uid = f"lol-pool-{i}"
+            await run_commands(fb2.start_lol, FakeEvent(group="71000", user=uid), "")
+            g_ = fb2.games.get(m.SessionKey.game("71000", uid, "lol"))
+            if g_:
+                lol_targets.add(g_.target)
+        check(lol_targets <= lol_pool, f"LoL 20 局答案都来自可出题池（{len(lol_pool)}）")
+        lol_out = [p for p in ldb.players if ldb.theme.title_of(p) not in lol_pool]
+        ev_lol_out = FakeEvent(text=lol_out[0]["gameId"], group="71000", user="lol-out", name="池外")
+        await run_commands(fb2.start_lol, FakeEvent(group="71000", user="lol-out"), "")
+        await fb2.on_message(ev_lol_out)
+        check(ev_lol_out.results and "第 1/" in _flatten(ev_lol_out.results[0]), "LoL 池外选手能正常猜")
+
     print("\n全部自测通过 ✅")
     print("足球棋盘示例：\n" + m.render_board(fbt, 1, 10, haaland, rodri))
 
