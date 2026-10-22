@@ -1,0 +1,48 @@
+{
+  "max_attempts": {
+    "description": "每局最多猜测次数",
+    "type": "int",
+    "default": 8,
+    "hint": "与官方玩法一致为 8 次。修改后开局提示会同步变化。"
+  },
+  "default_difficulty": {
+    "description": "默认难度",
+    "type": "string",
+    "default": "normal",
+    "options": ["beginner", "easy", "normal"],
+    "hint": "beginner=入门（知名选手 322 人），easy=简单（384 人），normal=普通（全部 646 人）。"
+  },
+  "timeout_minutes": {
+    "description": "单局限时（分钟）",
+    "type": "int",
+    "default": 30,
+    "hint": "超时自动公布答案。填 0 表示不限时。"
+  },
+  "free_text_guess": {
+    "description": "允许无指令直接猜",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，群里直接发选手昵称（或「猜 xxx」）即可提交，仅在对局进行中对精确匹配生效，不会抢普通聊天。"
+  },
+  "enable_hint": {
+    "description": "开启「提示」指令",
+    "type": "bool",
+    "default": true
+  },
+  "hint_limit": {
+    "description": "每局提示次数上限",
+    "type": "int",
+    "default": 2
+  },
+  "show_legend": {
+    "description": "首次猜测时附带颜色图例",
+    "type": "bool",
+    "default": true,
+    "hint": "告诉新玩家 🟩 一致、🟨 接近、🟥 不符和箭头含义。"
+  },
+  "at_sender": {
+    "description": "群聊反馈时 @ 猜的人",
+    "type": "bool",
+    "default": true
+  }
+}
