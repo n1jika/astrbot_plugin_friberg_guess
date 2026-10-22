@@ -11,7 +11,7 @@
 | --- | --- | --- | --- | --- |
 | `弗一把` | CS Major 选手 | 646 | 8 | 国家 · 赛区 · 战队 · 年龄 · 位置 · Major 冠军 · 出场 · 状态 |
 | `足一把` | 足球球员 | 1141 | 10 | 国籍 · 联赛 · 俱乐部 · 位置 · 出生年 · 号码 · 欧冠 · 世界杯届数 · 世界杯冠军 |
-| `撸一把` | LoL 职业选手 | 2427 | 8 | 位置 · 国家 · 大洲 · 年龄 · 状态 |
+| `撸一把` | LoL 职业选手 | 386 | 8 | 位置 · 国家 · 大洲 · 战队 · 年龄 · S 赛参赛 · S 赛冠军 · 状态 |
 | `瓦一把` | 瓦罗兰特选手 | 543 | 8 | 国籍 · 赛区 · 战队 · 身份 · 职责 · 年龄 · 大师赛参赛 · 大师赛冠军 · 冠军赛参赛 · 冠军赛冠军 |
 
 ## 玩法示例
@@ -59,6 +59,27 @@ Bot ：第 1/10 猜｜哈兰德
 - **瓦罗兰特**：国籍同大洲为黄；战队同赛区为黄；身份要「状态 + 是否一线队」两项都对才绿
   （只要有一方退役就只比状态）；职责完全相同为绿、有交集为黄；大师赛参赛 ±2、冠军赛参赛 ±1；
   年龄与两个冠军数只 ↑/↓ 不给黄
+
+### 撸一把（LoL）
+
+```
+用户：撸一把
+Bot ：🖱 撸一把 · 猜LoL 职业选手
+      难度：易（热门 200 人）
+      机会：8 次 · 限时 30 分钟
+
+用户：Chovy
+Bot ：第 1/8 猜｜Chovy
+      🟩位置 中单　🟩国家 韩国
+      🟩大洲 亚洲　🟨战队 Gen.G
+      🟥年龄 25↑　🟥S赛参赛 7↑
+      🟥S赛冠军 0↑　🟩状态 现役
+      还剩 7 次机会
+```
+
+比的是 8 项：位置 · 国家 · 大洲 · **战队** · 年龄 · **S 赛参赛** · **S 赛冠军** · 状态。
+「战队」同队为绿、效力过对方现队或同赛区为黄；「S 赛参赛」差 1 次以内为黄；
+「S 赛冠军」必须完全一致。
 
 ### 瓦一把（瓦罗兰特）
 
@@ -110,9 +131,9 @@ Bot ：第 2/8 猜｜ZmjjKK
 
 | 难度 | CS | 足球 | LoL | 瓦罗兰特 |
 | --- | --- | --- | --- | --- |
-| `易`（默认） | 最火 200 人 | 知名 300 人（含退役与小联赛巨星） | 中韩选手 782 人 | 热门 150 人（含退役、自由人） |
-| `中` | 主流选手 384 人 | 五大联赛 925 人 | 现役选手 1904 人 | 有国际赛履历 314 人 |
-| `难` | 全部 646 人 | 全部 1141 人（含非五大与退役） | 全部 2393 人（含退役） | 全部 541 人 |
+| `易`（默认） | 最火 200 人 | 知名 300 人（含退役与小联赛巨星） | 热门 200 人 | 热门 150 人（含退役、自由人） |
+| `中` | 主流选手 384 人 | 五大联赛 925 人 | 现役 304 人 | 有国际赛履历 314 人 |
+| `难` | 全部 646 人 | 全部 1141 人（含非五大与退役） | 全部 386 人（含知名退役） | 全部 541 人 |
 
 用法：`弗一把 难`、`足一把 易`、`撸一把 中`、`瓦一把 难`。旧难度词仍然兼容：`入门`→易、
 `简单`→中、`普通`/`地狱`→难。
@@ -123,7 +144,7 @@ Bot ：第 2/8 猜｜ZmjjKK
 | --- | --- | --- | --- | --- |
 | 弗一把 | 646 | 200 | 384 | 646 |
 | 足一把 | 1141 | 300 | 925 | 1141 |
-| 撸一把 | 2427 | 782 | 1904 | 2393 |
+| 撸一把 | 386 | 200 | 304 | 386 |
 | 瓦一把 | 543 | 150 | 314 | 541 |
 
 也就是说：`足一把` 的答案来自 300 人，但池外那 841 人照样能提交、照样有完整棋盘反馈，
@@ -218,7 +239,7 @@ https://github.com/weadee/astrbot_plugin_friberg_guess
 | --- | --- | --- |
 | `data/players.json` | 646 位 CS Major 选手 | 社区整理版本（快照 2026-08-04） |
 | `data/football_players.json` | 1141 位足球球员 | 足一把 `players.js`（2026-27 赛季初） |
-| `data/lol_players.json` | 2427 位 LoL 选手 | [Liquipedia](https://liquipedia.net/leagueoflegends) 选手页 Infobox，用 `tools/build_lol_db.py` 生成 |
+| `data/lol_players.json` | 386 位 LoL 选手（现役 + 知名退役） | [guessassin](https://guessassin.xyz) 的选手接口（战队 / S 赛）+ [Liquipedia](https://liquipedia.net/leagueoflegends) 选手页（真名 / 别名），用 `tools/enrich_lol_db.py` 生成 |
 | `data/valorant_players.json` | 543 位瓦罗兰特选手 | [瓦一把](https://wayiba.com) 站点 `players.generated.json`，用 `tools/build_valorant_db.py` 生成 |
 
 - CS 判定口径参照开源项目 [csgofriberg](https://github.com/shnlfriberg/csgofriberg)（AGPL-3.0）。
@@ -232,30 +253,45 @@ https://github.com/weadee/astrbot_plugin_friberg_guess
 
 - CS 的 `team_history` 当前快照为空，所以「战队」只会 🟩 或 🟥。
 - 足球的俱乐部按站点规则：五大联赛显示队名，其它统一显示「非五大联赛」，退役显示「已退役」。
-- LoL 题库来自 Liquipedia 全量选手页；同名（如两个 Ace）不作为答案，所以答案池比题库少 34 条。
+- LoL 现在只收「现役 + S 赛履历厚的退役」，所以库比原来小很多（386 人）；另一半现役选手没有战队数据（自由人/替补），「战队」格显示 `—`。
 - 瓦罗兰特有 1 个重名标题 `Klaus`（2 条记录），同样只可猜、不作答案，故难档是 541 而非 543。
 - 年龄、队伍、联赛均为快照值，转会后会有偏差，可用 `图鉴` 核对。
 
 ## 撸一把题库
 
-数据来自 [Liquipedia](https://liquipedia.net/leagueoflegends) 的选手页（`Infobox player`），
-字段是 ID、真名、出生日期、国籍、位置、状态、别名。想更新就重跑脚本：
+两段数据拼起来：
+
+1. **[guessassin](https://guessassin.xyz)** 的选手接口（`/api/players/CN_KR` 与 `/api/players/GLOBAL`）
+   给出「当前战队、历史战队、S 赛出场次数、S 赛冠军数、赛区、位置、年龄、出生地」；
+   退役老将通过 `/api/feedback/search-players` + `player-detail` 按 ID 补。
+2. **[Liquipedia](https://liquipedia.net/leagueoflegends)** 的选手页补真名、别名、中文国籍。
 
 ```bash
-python tools/build_lol_db.py              # 断点续抓，缓存在 data/.lol_liquipedia_cache.json
-python tools/build_lol_db.py --limit 300  # 只抓前 300 页试水
-python tools/build_lol_db.py --reset      # 清空进度重抓
+python tools/build_lol_db.py        # 重建 Liquipedia 基底（data/lol_players.liquipedia.json）
+python tools/enrich_lol_db.py       # 合并战队 / S 赛数据，写 data/lol_players.json
+python tools/enrich_lol_db.py --probe   # 只看统计不写文件
 ```
 
-脚本遵守 Liquipedia 的规则：请求间隔 ≥2 秒、带可识别的 User-Agent、只读公开页面。
-国籍到中文名 / 大洲的映射写在脚本里，遇到没收录的国家会保留英文名、大洲留空。
+选题规则：
 
-> 为什么 LoL 只有 5 项属性：Liquipedia 的 infobox 里 `team` / `region` 大多为空
-> （队伍与赛区靠站内的 Cargo 表渲染，API 不直接给），所以没有做「队伍」「赛区」格；
-> `teams` 字段全量覆盖率不到 4%，放进去会让两两比较大面积假绿。
+- **只收现役**（最后出场年份 ≥ 2025），退役只留 **S 赛履历厚的**（S 赛冠军 / 出场次数达到门槛），
+  共 386 人：现役 304、退役 82。
+- 只挂教练头衔的不算选手，直接排除。
+- 同名选手（如两个 Uzi，一个中国的简自豪、一个越南的）按真名对齐，不会被串号。
+- 同名标题仍然可以猜，但不会成为答案。
 
-另：LoL 有 16 个重名标题（涉及 34 条记录），这些选手可以猜，但不会成为答案 ——
-否则「猜中了」也可能判到同名的那位身上。
+### 难度
+
+| 档位 | 人数 | 选法 |
+| --- | --- | --- |
+| `易`（默认） | 200 | 点名名单（Faker、Chovy、Knight、Uzi、Bengi…）+ 有战队、有 S 赛履历的补齐 |
+| `中` | 304 | 全部现役 |
+| `难` | 386 | 全部（含知名退役） |
+
+## 瓦一把题库
+
+数据来自 [瓦一把](https://wayiba.com) 站点公开的 `players.generated.json`，字段是 ID、中文名、
+真名、国籍、赛区、战队、职责、年龄、大师赛/冠军赛参赛与夺冠次数。想更新就重跑脚本：
 
 ```bash
 python tools/build_valorant_db.py              # 抓 wayiba 的 players.generated.json 生成题库
@@ -271,7 +307,7 @@ python tools/build_valorant_db.py --cache      # 用上次下载的缓存重算�
 python tests/selftest.py
 ```
 
-桩掉 astrbot 后覆盖：四题库加载、中英文与别名检索、CS / 足球 / 瓦罗兰特判定细节、棋盘渲染、
+桩掉 astrbot 后覆盖：四题库加载、中英文与别名检索、CS / 足球 / 瓦罗兰特判定细节、LoL 的战队与 S 赛判定、棋盘渲染、
 CS 与足球整局、题库切换、答案池与全量题库的关系、提示 / 图鉴 / 排行、私聊无前缀、
 存档恢复、超时结算。
 

@@ -187,7 +187,13 @@ async def main() -> None:
     lol_path = ROOT / "data" / "lol_players.json"
     if lol_path.exists():
         lol_db = m.PlayerDB(m.THEMES["lol"], lol_path)
-        check(len(lol_db.players) >= 500, f"LoL 题库 {len(lol_db.players)} 人")
+        check(len(lol_db.players) >= 350, f"LoL 题库 {len(lol_db.players)} 人")
+        act = [p for p in lol_db.players if p["status"] == "Active"]
+        ret = [p for p in lol_db.players if p["status"] == "Retired"]
+        check(len(act) + len(ret) == len(lol_db.players), f"LoL 只有现役与退役（现役 {len(act)} / 退役 {len(ret)}）")
+        check(ret and all(p["_worlds_title"] or p["_worlds_app"] for p in ret), "LoL 退役只留 S 赛履历厚的")
+        check(all("_team" in p and "_worlds_app" in p for p in lol_db.players), "LoL 每条都带战队与 S 赛数据")
+        check(sum(1 for p in lol_db.players if p["_team"]) >= 150, "LoL 战队覆盖够用")
     else:
         print("  · LoL 题库未导入（data/lol_players.json 缺失），本次跳过")
 
@@ -226,20 +232,33 @@ async def main() -> None:
     lol_theme = m.THEMES["lol"]
     raw = {
         "players": [
-            {"gameId": "A", "realName": "a", "age": 30, "currentTeam": "T1", "country": "韩国",
-             "continent": "亚洲", "positions": ["中单"], "status": "Active"},
-            {"gameId": "B", "realName": "b", "age": 25, "currentTeam": "Gen.G", "country": "中国",
-             "continent": "亚洲", "positions": ["上单"], "status": "Retired"},
+            {"gameId": "A", "realName": "a", "age": 30, "currentTeam": "T1", "region": "LCK",
+             "historicalTeams": ["Gen.G"], "country": "韩国", "continent": "亚洲",
+             "positions": ["中单"], "status": "Active", "worldsApp": 6, "worldsTitle": 3},
+            {"gameId": "B", "realName": "b", "age": 25, "currentTeam": "Gen.G", "region": "LCK",
+             "historicalTeams": ["T1"], "country": "中国", "continent": "亚洲",
+             "positions": ["上单"], "status": "Retired", "worldsApp": 3, "worldsTitle": 0},
+            {"gameId": "C", "realName": "c", "age": 27, "currentTeam": "Team Liquid", "region": "LCS",
+             "historicalTeams": [], "country": "美国", "continent": "北美洲",
+             "positions": ["下路"], "status": "Active", "worldsApp": 5, "worldsTitle": 1},
         ]
     }
-    ga, gb = lol_theme.load(raw)
+    ga, gb, gc = lol_theme.load(raw)
     cells = {c.label: (c.value, c.level) for c in lol_theme.judge(ga, gb)}
+    check(len(cells) == 8, f"LoL 棋盘 8 项（{sorted(cells)}）")
     check(cells["位置"][1] == "wrong", "LoL：位置不同 → 红")
     check(cells["国家"][1] == "close", "LoL：不同国家同大洲 → 黄")
     check(cells["大洲"][1] == "correct", "LoL：同大洲 → 绿")
+    check(cells["战队"][1] == "close" and cells["战队"][0] == "T1", "LoL：效力过对方现队 → 黄")
     check(cells["年龄"][1] == "wrong" and cells["年龄"][0].endswith("↓"), "LoL：年龄差 5 → 红 + 更小")
+    check(cells["S赛参赛"][1] == "wrong" and cells["S赛参赛"][0].endswith("↓"), "LoL：S 赛次数差 3 → 红 + 更小")
+    check(cells["S赛冠军"][1] == "wrong", "LoL：S 赛冠军必须一致")
     check(cells["状态"][1] == "wrong", "LoL：现役 vs 退役 → 红")
-    check(all(c.level == "correct" for c in lol_theme.judge(ga, ga)), "LoL：自己猜自己全绿")
+    cross = {c.label: (c.value, c.level) for c in lol_theme.judge(ga, gc)}
+    check(cross["战队"][1] == "wrong", "LoL：不同赛区不同队 → 红")
+    check(cross["国家"][1] == "wrong", "LoL：不同大洲 → 红")
+    same = {c.label: (c.value, c.level) for c in lol_theme.judge(ga, ga)}
+    check(all(level == "correct" for _v, level in same.values()), "LoL：自己猜自己全绿")
 
     print("[5] 棋盘渲染")
     board = m.render_board(fbt, 1, 10, haaland, rodri)
@@ -499,8 +518,10 @@ async def main() -> None:
     ldb = fb2.dbs["lol"]
     if ldb.players:
         check(ldb.pool_size("easy") == len(ldb.answer_pool("easy")), "LoL 显示人数=可出题数")
-        check(len(ldb.players) == 2427, f"LoL 题库仍是 2427 人（{len(ldb.players)}）")
-        check(len(ldb._ambiguous) == 16, f"LoL 有 16 个同名标题（{len(ldb._ambiguous)}）")
+        check(len(ldb.players) == 386, f"LoL 题库 386 人（{len(ldb.players)}）")
+        check(ldb.pool_size("easy") == 200, f"LoL 易档 200 人（{ldb.pool_size('easy')}）")
+        check(ldb.pool_size("normal") == 304, f"LoL 中档=现役 304 人（{ldb.pool_size('normal')}）")
+        check(ldb.pool_size("hard") == 386, f"LoL 难档=全库（{ldb.pool_size('hard')}）")
         lol_pool = {ldb.theme.title_of(p) for p in ldb.answer_pool("easy")}
         check(not (lol_pool & ldb._ambiguous), "同名选手不会成为答案")
         lol_targets = set()

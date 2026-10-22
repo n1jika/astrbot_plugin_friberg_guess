@@ -554,8 +554,22 @@ class FootballTheme(Theme):
         ]
 
 
+LOL_EASY_LIMIT = 200
+LOL_HOT = [
+    "Faker", "Chovy", "Knight", "Ruler", "Zeus", "Oner", "Gumayusi", "Keria",
+    "Canyon", "ShowMaker", "Viper", "Scout", "Meiko", "Bin", "Xun", "Elk",
+    "JackeyLove", "Tian", "Rookie", "TheShy", "Doinb", "Crisp", "Xiaohu", "Wei",
+    "Breathe", "Light", "Creme", "Kanavi", "369", "Missing", "Hope", "Tarzan",
+    "Peanut", "Kiin", "Bdd", "Cuzz", "Lehends", "Doran", "Zeka", "Kingen",
+    "Pyosik", "Caps", "Humanoid", "Hans Sama", "Elyoya", "Blaber", "Jojopyun",
+    "Impact", "CoreJJ", "Uzi", "Clearlove", "Bengi", "Bang", "Wolf", "PraY",
+    "Smeb", "Deft", "Mata", "PawN", "Imp", "xPeke", "Jankos", "Doublelift",
+]
+LOL_HOT_KEYS = {name.lower() for name in LOL_HOT}
+
+
 class LolTheme(Theme):
-    """LoL 职业选手（数据来自 Liquipedia 的 Infobox player）。"""
+    """LoL 职业选手（战队 / S 赛数据来自 guessassin，真名与别名来自 Liquipedia）。"""
 
     key = "lol"
     command = "撸一把"
@@ -580,9 +594,16 @@ class LolTheme(Theme):
             p = dict(p)
             positions = p.get("positions")
             p["_positions"] = positions if isinstance(positions, list) else [str(positions or "—")]
+            # 教练不算选手：只挂教练头衔的跳过
+            if p["_positions"] and all(x == "教练" for x in p["_positions"]):
+                continue
             p["_team"] = (p.get("currentTeam") or "").strip()
+            p["_history"] = [t for t in (p.get("historicalTeams") or []) if t]
             p["_country"] = (p.get("country") or "").strip()
             p["_continent"] = (p.get("continent") or "").strip()
+            p["_region"] = (p.get("region") or "").strip()
+            p["_worlds_app"] = int(p.get("worldsApp") or 0)
+            p["_worlds_title"] = int(p.get("worldsTitle") or 0)
             out.append(p)
         return out
 
@@ -594,19 +615,41 @@ class LolTheme(Theme):
     def title_of(self, player: dict) -> str:
         return player["gameId"]
 
+    @staticmethod
+    def _fame(player: dict) -> tuple:
+        """热门排序：有战队 > S 赛冠军 > S 赛出场 > 现役。"""
+        return (
+            0 if player.get("_team") else 1,
+            0 if str(player.get("status", "")).lower().startswith("act") else 1,
+            -int(player.get("_worlds_title") or 0),
+            -int(player.get("_worlds_app") or 0),
+            player["gameId"].lower(),
+        )
+
     def pools(self, players: list[dict]) -> dict[str, list[dict]]:
         active = [p for p in players if str(p.get("status", "")).lower().startswith("act")]
-        # 中韩选手是中文玩家最眼熟的一批，作为「易」档
-        cnkr = [p for p in players if p.get("country") in {"韩国", "中国", "中国台湾", "中国香港", "中国澳门"}]
+        # 「易」：点名名单优先，其余按热度补到 200 人
+        hot = [p for p in players if p["gameId"].lower() in LOL_HOT_KEYS]
+        rest = sorted(players, key=self._fame)
+        picked: list[dict] = []
+        seen: set[str] = set()
+        for player in hot + rest:
+            key = self.title_of(player)
+            if key in seen:
+                continue
+            seen.add(key)
+            picked.append(player)
+            if len(picked) >= LOL_EASY_LIMIT:
+                break
         return {
-            "easy": cnkr or active or players,
+            "easy": picked or players,
             "normal": active or players,
             "hard": players,
         }
 
     def pool_label(self, pool: str) -> str:
         return {
-            "easy": "易（中韩）",
+            "easy": "易（热门 200 人）",
             "normal": "中（现役）",
             "hard": "难（全量）",
         }.get(pool, pool)
@@ -632,8 +675,28 @@ class LolTheme(Theme):
         same_continent = bool(guess.get("_continent")) and guess.get("_continent") == target.get("_continent")
         cells.append(Cell("大洲", guess.get("_continent") or "—", "correct" if same_continent else "wrong"))
 
+        # 战队：同名=一致；效力过对方现队=接近；同赛区也接近
+        g_team, t_team = guess.get("_team", ""), target.get("_team", "")
+        g_hist = {t.lower() for t in guess.get("_history") or []}
+        t_hist = {t.lower() for t in target.get("_history") or []}
+        if g_team and g_team.lower() == t_team.lower():
+            level = "correct"
+        elif g_team and (g_team.lower() in t_hist or t_team.lower() in g_hist):
+            level = "close"
+        elif guess.get("_region") and guess.get("_region") == target.get("_region"):
+            level = "close"
+        else:
+            level = "wrong"
+        cells.append(Cell("战队", g_team or "—", level))
+
         # 年龄 ±2
         cells.append(_diff_cell("年龄", int(guess.get("age") or 0), int(target.get("age") or 0), 2))
+
+        # S 赛参赛次数 ±1、S 赛冠军必须相同
+        cells.append(_diff_cell("S赛参赛", int(guess.get("_worlds_app") or 0), int(target.get("_worlds_app") or 0), 1))
+        cells.append(
+            _diff_cell("S赛冠军", int(guess.get("_worlds_title") or 0), int(target.get("_worlds_title") or 0), 0)
+        )
 
         # 状态
         same_status = str(guess.get("status", "")).lower() == str(target.get("status", "")).lower()
@@ -653,19 +716,33 @@ class LolTheme(Theme):
             where += f"（{player['_continent']}）"
         parts = [
             player.get("realName") or "",
-            player.get("_team") or "",
+            player.get("_team") or "无队伍",
             where,
             "/".join(player.get("_positions") or ["—"]),
             f"{player.get('age', '—')} 岁",
         ]
-        return "\n".join([f"📇 {player['gameId']}（{status}）", *_wrap_join(parts)])
+        honors = _wrap_join(
+            [
+                f"S 赛 {player.get('_worlds_app', 0)} 次",
+                f"冠军 {player.get('_worlds_title', 0)}",
+            ]
+        )
+        body = _wrap_join(parts)
+        if honors:
+            body.append("🏆 " + honors[0])
+            body.extend(honors[1:])
+        return "\n".join([f"📇 {player['gameId']}（{status}）", *body])
 
     def hints(self, player: dict) -> list[tuple[str, str]]:
         return [
             ("位置", "/".join(player.get("_positions") or ["—"])),
+            ("战队", player.get("_team") or "无队伍"),
+            ("赛区", player.get("_region") or "—"),
             ("国家", player.get("_country") or "—"),
             ("大洲", player.get("_continent") or "—"),
             ("年龄", f"{player.get('age', '—')} 岁"),
+            ("S赛参赛", f"S 赛出场 {player.get('_worlds_app', 0)} 次"),
+            ("S赛冠军", f"S 赛冠军 {player.get('_worlds_title', 0)} 次"),
             ("状态", "现役" if str(player.get("status", "")).lower().startswith("act") else "退役"),
         ]
 
