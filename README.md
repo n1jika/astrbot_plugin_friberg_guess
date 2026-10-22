@@ -81,6 +81,12 @@ Bot ：第 1/10 猜｜哈兰德（Erling Haaland）
 
 ## 安装
 
+想省事就直接下 Releases 里的安装包（zip 内已含插件目录，解压即用）：
+
+<https://github.com/weadee/astrbot_plugin_friberg_guess/releases/latest>
+
+手动安装：
+
 1. 把整个 `astrbot_plugin_friberg_guess` 文件夹放进 `AstrBot/data/plugins/`；
 2. 在 WebUI「插件管理」里点重载（或重启 AstrBot）；
 3. 插件配置里可调次数、限时、难度、各题库开关。
