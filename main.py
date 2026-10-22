@@ -142,7 +142,7 @@ class Theme:
     # -- 组装 --
     def resolve_pool(self, raw: str, default: str) -> str | None:
         """把用户输入的难度词转成 pool key；无法识别返回 None。"""
-        token = (raw or "").strip()
+        token = (raw or "").strip().split()[0] if (raw or "").strip() else ""
         if not token:
             return default if default in self.pool_alias else self.default_pool
         return self.pool_alias.get(token) or self.pool_alias.get(token.lower())
@@ -267,6 +267,36 @@ class CSTheme(Theme):
 
 TOP5_LEAGUES = {"英超", "西甲", "德甲", "意甲", "法甲"}
 
+# 「易」档用的热门球队（名单与题库里的队名一致）
+BIG_CLUBS = {
+    # 英超
+    "曼城", "利物浦", "阿森纳", "曼联", "切尔西", "热刺", "纽卡斯尔联", "阿斯顿维拉",
+    # 西甲
+    "皇家马德里", "巴塞罗那", "马德里竞技", "塞维利亚", "皇家社会", "比利亚雷亚尔",
+    "皇家贝蒂斯", "瓦伦西亚",
+    # 德甲
+    "拜仁慕尼黑", "多特蒙德", "勒沃库森", "莱比锡红牛", "法兰克福", "斯图加特",
+    # 意甲
+    "国际米兰", "AC米兰", "尤文图斯", "那不勒斯", "罗马", "拉齐奥", "亚特兰大",
+    # 法甲
+    "巴黎圣日耳曼", "马赛", "里昂", "摩纳哥", "里尔",
+}
+
+# 题目范围：单联赛 / 五大
+LEAGUE_SCOPES = {
+    "英超": "epl", "西甲": "laliga", "德甲": "bundesliga", "意甲": "seriea", "法甲": "ligue1",
+    "五大": "top5", "五大联赛": "top5",
+}
+SCOPE_LABELS = {
+    "all": "全部联赛", "top5": "五大联赛", "epl": "英超", "laliga": "西甲",
+    "bundesliga": "德甲", "seriea": "意甲", "ligue1": "法甲",
+}
+DIFF_WORDS = {
+    "易": "easy", "简单": "easy", "easy": "easy",
+    "中": "normal", "普通": "normal", "标准": "normal", "normal": "normal",
+    "难": "hard", "困难": "hard", "地狱": "hard", "hard": "hard",
+}
+
 
 def _eff_club(player: dict) -> str:
     if player.get("league") == "已退役":
@@ -287,12 +317,26 @@ class FootballTheme(Theme):
     db_file = "football_players.json"
     attempts = 10
     rows = ((0, 1), (2, 3), (4, 5), (6, 7), (8,))
-    pool_alias = {
-        "易": "easy", "入门": "easy", "简单": "easy", "easy": "easy",
-        "中": "normal", "普通": "normal", "标准": "normal", "核心": "normal", "normal": "normal",
-        "难": "hard", "全部": "hard", "全量": "hard", "地狱": "hard", "full": "hard", "hard": "hard",
-    }
-    difficulty_hint = "易 / 中 / 难"
+    pool_alias = {**DIFF_WORDS, "核心": "normal", "全部": "hard", "全量": "hard", "full": "hard"}
+    difficulty_hint = "易 / 中 / 难，或指定联赛：英超 / 西甲 / 德甲 / 意甲 / 法甲 / 五大"
+
+    def resolve_pool(self, raw: str, default: str) -> str | None:
+        """支持「联赛 + 难度」组合，如 `英超 易`、`五大 难`。"""
+        scope = ""
+        diff = DIFF_WORDS.get(str(default).strip(), "normal")
+        for token in (raw or "").split():
+            if token in LEAGUE_SCOPES:
+                scope = LEAGUE_SCOPES[token]
+            elif token in DIFF_WORDS:
+                diff = DIFF_WORDS[token]
+            elif token in {"全部", "全量", "所有", "full", "all"}:
+                scope, diff = "all", "hard"
+            else:
+                return None
+        # 只说了「难」没限定范围时，就是全库；否则默认限定五大联赛
+        if not scope:
+            scope = "all" if diff == "hard" else "top5"
+        return f"{scope}:{diff}"
 
     def load(self, raw: Any) -> list[dict]:
         players = raw.get("players") if isinstance(raw, dict) else raw
@@ -308,25 +352,34 @@ class FootballTheme(Theme):
         return f"{cn}（{player['name']}）" if cn and cn != player["name"] else player["name"]
 
     def pools(self, players: list[dict]) -> dict[str, list[dict]]:
-        core = [p for p in players if not p.get("scope")]
-        # 「易」取有欧战或世界杯履历的球员，名字更眼熟
-        known = [
-            p
-            for p in players
-            if (p.get("ucl") or 0) > 0 or (p.get("wcTitle") or 0) > 0 or (p.get("wc") or 0) >= 2
-        ]
-        return {
-            "easy": known or core or players,
-            "normal": core or players,
-            "hard": players,
+        hot = [p for p in players if p.get("club") in BIG_CLUBS]
+        top5 = [p for p in players if p.get("league") in TOP5_LEAGUES]
+        out = {
+            # 全库：易=豪门，中=五大联赛，难=全部（含沙特/美职/英冠/退役）
+            "all:easy": hot or players,
+            "all:normal": top5 or players,
+            "all:hard": players,
+            "top5:easy": hot or top5,
+            "top5:normal": top5,
+            "top5:hard": top5,
         }
+        for league, key in LEAGUE_SCOPES.items():
+            if key == "top5":
+                continue
+            pool = [p for p in players if p.get("league") == league]
+            hot_league = [p for p in pool if p.get("club") in BIG_CLUBS]
+            out[f"{key}:easy"] = hot_league or pool
+            out[f"{key}:normal"] = pool
+            out[f"{key}:hard"] = pool
+        return out
 
     def pool_label(self, pool: str) -> str:
-        return {
-            "easy": "易（有欧战/世界杯履历）",
-            "normal": "中（核心球员）",
-            "hard": "难（全部，含联赛扩容）",
-        }.get(pool, pool)
+        scope, _, diff = pool.partition(":")
+        scope_label = SCOPE_LABELS.get(scope, scope)
+        diff_label = {"easy": "易（热门球队）", "normal": "中（全部球员）", "hard": "难（全部，含扩容）"}.get(diff, diff)
+        if scope == "all" and diff == "hard":
+            return "全部（含非五大联赛与退役）"
+        return f"{scope_label} · {diff_label}"
 
     def judge(self, guess: dict, target: dict) -> list[Cell]:
         cells: list[Cell] = []
@@ -674,7 +727,7 @@ class SessionKey:
 _START_PATTERNS: list[tuple[re.Pattern[str], str]] = []
 for _key, _theme in THEMES.items():
     _names = "|".join(re.escape(n) for n in (_theme.command, *_theme.aliases))
-    _START_PATTERNS.append((re.compile(rf"^[/／]?(?:{_names})(?:\s+(\S+))?$", re.I), _key))
+    _START_PATTERNS.append((re.compile(rf"^[/／]?(?:{_names})(?:\s+(.+))?$", re.I), _key))
 
 _LOOKUP_RE = re.compile(r"^[/／]?(?:图鉴|查选手|查球员|查资料)\s*(\S+)?$")
 _LEADING_RE = re.compile(r"^[/／]?(?:我猜|猜一下|猜|guess|answer|是)\s*", re.I)
@@ -880,6 +933,14 @@ class GuessProPlugin(Star):
         return "\n".join(lines)
 
     # ---------------- 开局 ----------------
+
+    def _args_after_command(self, event: AstrMessageEvent, theme: Theme) -> str:
+        """取命令词后面的全部文字，支持「英超 易」这种两个词。"""
+        text = (event.message_str or "").strip()
+        for name in sorted((theme.command, *theme.aliases), key=len, reverse=True):
+            if text.startswith(name):
+                return text[len(name) :].strip()
+        return ""
 
     def _pk(self, event: AstrMessageEvent) -> tuple[str, str, str]:
         gid, uid = event.get_group_id(), event.get_sender_id()
@@ -1089,7 +1150,8 @@ class GuessProPlugin(Star):
         """CS:GO / CS2 Major 选手猜谜"""
         if not self._session_ok(event):
             return
-        yield event.chain_result(self._with_at(event, self._begin(event, "cs", difficulty)))
+        args = self._args_after_command(event, THEMES["cs"]) or difficulty
+        yield event.chain_result(self._with_at(event, self._begin(event, "cs", args)))
         event.stop_event()
 
     @filter.command("足一把", alias={"足球一把", "猜球员", "猜球星"})
@@ -1097,7 +1159,8 @@ class GuessProPlugin(Star):
         """足球球员猜谜"""
         if not self._session_ok(event):
             return
-        yield event.chain_result(self._with_at(event, self._begin(event, "football", difficulty)))
+        args = self._args_after_command(event, THEMES["football"]) or difficulty
+        yield event.chain_result(self._with_at(event, self._begin(event, "football", args)))
         event.stop_event()
 
     @filter.command("撸一把", alias={"lol一把", "猜撸", "猜联盟"})
@@ -1105,7 +1168,8 @@ class GuessProPlugin(Star):
         """LoL 职业选手猜谜"""
         if not self._session_ok(event):
             return
-        yield event.chain_result(self._with_at(event, self._begin(event, "lol", difficulty)))
+        args = self._args_after_command(event, THEMES["lol"]) or difficulty
+        yield event.chain_result(self._with_at(event, self._begin(event, "lol", args)))
         event.stop_event()
 
     @filter.command("提示", alias={"线索"})

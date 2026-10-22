@@ -358,6 +358,32 @@ async def main() -> None:
     out = await run_commands(strict.start_football, FakeEvent(group="40000", user="9"), "")
     check(not out, "仅私聊：群里的指令处理器也不响应")
 
+    print("[12] 足一把范围与热门球队")
+    fb_plugin = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    cases = [
+        ("足一把", "top5:normal", 700, 1200),
+        ("足一把 易", "top5:easy", 400, 600),
+        ("足一把 难", "all:hard", 1100, 1200),
+        ("足一把 英超", "epl:normal", 300, 340),
+        ("足一把 英超 易", "epl:easy", 150, 180),
+        ("足一把 五大 难", "top5:hard", 900, 950),
+        ("足一把 法甲", "ligue1:normal", 20, 40),
+    ]
+    for i, (text, expect_pool, lo, hi) in enumerate(cases):
+        ev_ = FakeEvent(text=text, group="50000", user=f"fb{i}", name="足球")
+        await fb_plugin.on_message(ev_)
+        gkey_ = m.SessionKey.game("50000", f"fb{i}", "football")
+        game_ = fb_plugin.games.get(gkey_)
+        check(game_ is not None and game_.pool == expect_pool, f"{text} → {expect_pool}")
+        size_ = fb_plugin.dbs["football"].pool_size(expect_pool)
+        check(lo <= size_ <= hi, f"{text} 池人数 {size_} 在合理区间")
+        reply_ = _flatten(ev_.results[0]) if ev_.results else ""
+        check("难度：" in reply_ and "人）" in reply_, f"{text} 开局写明范围与人数")
+
+    ev_bad_fb = FakeEvent(text="足一把 德乙", group="50000", user="fbx")
+    await fb_plugin.on_message(ev_bad_fb)
+    check("难度只有" in _flatten(ev_bad_fb.results[0]), "未知范围给出提示")
+
     print("\n全部自测通过 ✅")
     print("足球棋盘示例：\n" + m.render_board(fbt, 1, 10, haaland, rodri))
 
