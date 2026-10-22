@@ -9,3 +9,6 @@ __pycache__/
 state.json
 *.tmp
 *.zip
+
+# 抓取脚本的进度文件
+data/.lol_crawl_state.json

@@ -1,16 +1,22 @@
 {
-  "max_attempts": {
-    "description": "每局最多猜测次数",
-    "type": "int",
-    "default": 8,
-    "hint": "与官方玩法一致为 8 次。修改后开局提示会同步变化。"
-  },
-  "default_difficulty": {
+  "difficulty": {
     "description": "默认难度",
     "type": "string",
-    "default": "normal",
-    "options": ["beginner", "easy", "normal"],
-    "hint": "beginner=入门（知名选手 322 人），easy=简单（384 人），normal=普通（全部 646 人）。"
+    "default": "中",
+    "options": ["易", "中", "难"],
+    "hint": "易＝知名选手、中＝主流选手、难＝全部（含冷门/扩容）。开局时也可以临时指定：弗一把 难 / 足一把 易。"
+  },
+  "private_only": {
+    "description": "仅私聊可用",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后，群里发指令和选手名都不会响应，只能私聊玩。"
+  },
+  "max_attempts": {
+    "description": "每局猜测次数上限",
+    "type": "int",
+    "default": 0,
+    "hint": "0 表示按题库默认：CS 8 次、足球 10 次、LoL 8 次。填正数则三个题库统一用这个值。"
   },
   "timeout_minutes": {
     "description": "单局限时（分钟）",
@@ -18,11 +24,26 @@
     "default": 30,
     "hint": "超时自动公布答案。填 0 表示不限时。"
   },
+  "enable_cs": {
+    "description": "启用弗一把（CS Major 选手）",
+    "type": "bool",
+    "default": true
+  },
+  "enable_football": {
+    "description": "启用足一把（足球球员）",
+    "type": "bool",
+    "default": true
+  },
+  "enable_lol": {
+    "description": "启用撸一把（LoL 职业选手）",
+    "type": "bool",
+    "default": true
+  },
   "free_text_guess": {
     "description": "允许无指令直接猜",
     "type": "bool",
     "default": true,
-    "hint": "开启后，群里直接发选手昵称（或「猜 xxx」）即可提交，仅在对局进行中对精确匹配生效，不会抢普通聊天。"
+    "hint": "开启后，直接发选手名（或「猜 xxx」）即可提交，仅在对局进行中对精确匹配生效，不会抢普通聊天。"
   },
   "enable_hint": {
     "description": "开启「提示」指令",
@@ -37,8 +58,7 @@
   "show_legend": {
     "description": "首次猜测时附带颜色图例",
     "type": "bool",
-    "default": true,
-    "hint": "告诉新玩家 🟩 一致、🟨 接近、🟥 不符和箭头含义。"
+    "default": true
   },
   "at_sender": {
     "description": "群聊反馈时 @ 猜的人",

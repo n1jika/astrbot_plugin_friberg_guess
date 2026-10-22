@@ -1,11 +1,12 @@
 name: astrbot_plugin_friberg_guess
-display_name: 弗一把·猜选手
-short_desc: 群里一起猜 CS Major 选手，八项属性逐步逼近答案。
+display_name: 猜选手 · 弗一把/足一把/撸一把
+short_desc: 群里猜 CS 选手、足球球员、LoL 选手，三套题库共用一套玩法。
 desc: >-
-  CS:GO / CS2 Major 选手猜谜游戏（类 Wordle）。每人独立对局，每猜一位选手会按
-  国家/地区、赛区、战队、年龄、位置、Major 冠军数、Major 出场数、现役状态八项给出
-  逐条反馈，8 次机会内猜中即胜。内置 646 位 Major 选手库，支持三档难度、提示、战绩与群排行。
-version: 1.0.1
+  三合一的「猜选手」游戏（类 Wordle）。发「弗一把」「足一把」「撸一把」开局，
+  猜一位选手后按各题库的属性逐格给出接近度反馈：CS 比国家/赛区/战队/年龄/位置/
+  Major 冠军/出场/状态，足球比国籍/联赛/俱乐部/位置/出生年/号码/欧冠/世界杯，
+  LoL 比队伍/曾效力/赛区/位置/年龄/英雄/状态/世界赛/冠军。次数用尽或超时公布答案。
+version: 1.1.0
 author: weadee
 repo: https://github.com/weadee/astrbot_plugin_friberg_guess
 astrbot_version: ">=4.9.2"

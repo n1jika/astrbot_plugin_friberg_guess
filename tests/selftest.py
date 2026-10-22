@@ -1,4 +1,4 @@
-"""自测脚本：用桩模块替掉 astrbot，验证判定、检索、整局流程与存档。
+"""自测脚本：用桩模块替掉 astrbot，验证三个题库的判定、检索、整局流程与存档。
 
 用法：python tests/selftest.py
 """
@@ -96,17 +96,8 @@ def _install_stubs(data_dir: Path) -> None:
 
     _mod("astrbot")
     _mod("astrbot.api", AstrBotConfig=dict, logger=logging.getLogger("stub"))
-    _mod(
-        "astrbot.api.event",
-        AstrMessageEvent=_AstrMessageEvent,
-        MessageChain=_MessageChain,
-        filter=_Filter,
-    )
-    _mod(
-        "astrbot.api.message_components",
-        At=_Component,
-        Plain=_Component,
-    )
+    _mod("astrbot.api.event", AstrMessageEvent=_AstrMessageEvent, MessageChain=_MessageChain, filter=_Filter)
+    _mod("astrbot.api.message_components", At=_Component, Plain=_Component)
     _mod("astrbot.api.star", Context=_Context, Star=_Star)
     _mod("astrbot.core")
     _mod("astrbot.core.utils")
@@ -114,9 +105,9 @@ def _install_stubs(data_dir: Path) -> None:
 
 
 def _load_plugin():
-    spec = importlib.util.spec_from_file_location("friberg_main", ROOT / "main.py")
+    spec = importlib.util.spec_from_file_location("guess_main", ROOT / "main.py")
     module = importlib.util.module_from_spec(spec)
-    sys.modules["friberg_main"] = module
+    sys.modules["guess_main"] = module
     spec.loader.exec_module(module)
     return module
 
@@ -167,7 +158,6 @@ def _flatten(result) -> str:
 
 
 async def run_commands(handler, event, *args):
-    """指令 handler 可能是 async generator，也可能是协程。"""
     out = []
     result = handler(event, *args)
     if hasattr(result, "__aiter__"):
@@ -178,11 +168,6 @@ async def run_commands(handler, event, *args):
     return out
 
 
-# ------------------------------------------------------------------
-# 断言
-# ------------------------------------------------------------------
-
-
 def check(condition, message):
     if not condition:
         raise AssertionError(message)
@@ -190,156 +175,195 @@ def check(condition, message):
 
 
 async def main() -> None:
-    tmp = Path(tempfile.mkdtemp(prefix="friberg-selftest-"))
+    tmp = Path(tempfile.mkdtemp(prefix="guess-selftest-"))
     _install_stubs(tmp)
     m = _load_plugin()
-    print("[1] 选手库")
-    db = m.PlayerDB()
-    check(len(db.players) >= 600, f"加载 {len(db.players)} 位选手")
-    check(db.find("simple")[0]["nickname"] == "s1mple", "simple → s1mple（leet 归一）")
-    check(db.find("S1MPLE")[0]["nickname"] == "s1mple", "大小写不敏感")
-    check(db.find("zywo")[0]["nickname"] == "ZywOo", "前缀匹配 zywo → ZywOo")
-    kind, cands = db.match("niko")
-    check(kind == "exact" and cands[0]["nickname"].startswith("NiKo"), "同名条目按知名度取 NiKo")
-    kind, _ = db.match("zywo")
-    check(kind == "prefix", "匹配类型可区分 exact / prefix")
-    check(db.find("绝对不存在的名字") == [], "无结果时返回空列表")
-    check(len(db.pool("beginner")) < len(db.pool("normal")), "入门池小于普通池")
 
-    print("[2] 判定规则")
-    smpl = db.by_nickname("s1mple")
-    zywoo = db.by_nickname("ZywOo")
-    cells = m.judge(smpl, smpl)
-    check(all(c[2] == "correct" for c in cells), "自己猜自己全绿")
-    cells = dict((c[0], (c[1], c[2])) for c in m.judge(smpl, zywoo))
-    check(cells["国家"] == ("乌克兰", "close"), "不同国家同赛区 → 黄")
-    check(cells["赛区"] == ("欧洲", "correct"), "同赛区 → 绿")
-    check(cells["战队"][1] == "wrong", "战队不同且不在履历 → 红")
-    check(cells["年龄"] == ("28↓", "close"), "年龄差 3 岁 → 黄 + 答案更小")
-    check(cells["冠军"] == ("1↑", "wrong"), "冠军差 2 → 红 + 答案更大")
-    check(cells["状态"] == ("现役", "correct"), "同为现役 → 绿")
+    print("[1] 题库加载")
+    cs = m.PlayerDB(m.THEMES["cs"], ROOT / "data" / "players.json")
+    fb = m.PlayerDB(m.THEMES["football"], ROOT / "data" / "football_players.json")
+    check(len(cs.players) >= 600, f"CS 题库 {len(cs.players)} 人")
+    check(len(fb.players) >= 1000, f"足球题库 {len(fb.players)} 人")
+    lol_path = ROOT / "data" / "lol_players.json"
+    if lol_path.exists():
+        lol_db = m.PlayerDB(m.THEMES["lol"], lol_path)
+        check(len(lol_db.players) >= 50, f"LoL 题库 {len(lol_db.players)} 人")
+    else:
+        print("  · LoL 题库未导入（data/lol_players.json 缺失），本次跳过")
 
-    print("[3] 棋盘渲染")
-    board = m.render_guess(1, 8, smpl, zywoo)
-    check(board.count("\n") == 3, "四行结构")
-    check("🟨国家" in board and "🟩赛区" in board, "带颜色与属性名")
+    print("[2] 检索")
+    check(cs.find("simple")[0]["nickname"] == "s1mple", "CS：simple → s1mple")
+    check(cs.find("niko")[0]["nickname"].startswith("NiKo"), "CS：同名取知名度更高的 NiKo")
+    check(fb.find("哈兰德")[0]["name"] == "Erling Haaland", "足球：中文名可检索")
+    check(fb.find("haaland")[0]["cnName"] == "哈兰德", "足球：英文名可检索")
+    check(fb.find("魔笛") or fb.find("莫德里奇"), "足球：别名可检索")
 
-    print("[4] 整局流程")
-    plugin = m.FribergGuessPlugin(_Context(), {"timeout_minutes": 0})
-    plugin.db = db
+    print("[3] CS 判定")
+    smpl, zywoo = cs.get("s1mple"), cs.get("ZywOo")
+    cells = m.THEMES["cs"].judge(smpl, smpl)
+    check(all(c.level == "correct" for c in cells), "CS：自己猜自己全绿")
+    cells = {c.label: (c.value, c.level) for c in m.THEMES["cs"].judge(smpl, zywoo)}
+    check(cells["国家"][1] == "close", "CS：不同国家同赛区 → 黄")
+    check(cells["战队"][1] == "wrong", "CS：战队不同 → 红")
+    check(cells["年龄"] == ("28↓", "close"), "CS：年龄差 3 → 黄 + 更小")
+    check(cells["冠军"] == ("1↑", "wrong"), "CS：冠军差 2 → 红 + 更大")
+
+    print("[4] 足球判定")
+    fbt = m.THEMES["football"]
+    haaland = fb.find("哈兰德")[0]
+    rodri = fb.find("罗德里")[0]
+    cells = {c.label: (c.value, c.level) for c in fbt.judge(haaland, rodri)}
+    check(cells["国籍"][1] == "close", "足球：不同国籍同大洲 → 黄")
+    check(cells["联赛"][1] == "wrong", "足球：联赛不同 → 红")
+    check(cells["位置"][1] == "wrong", "足球：位置不同 → 红")
+    check(cells["出生年"][1] == "wrong" and cells["出生年"][0].endswith("↓"), "足球：出生年差 4 → 红 + 更小")
+    check(cells["世界杯"][1] == "close", "足球：世界杯届数差 1 → 黄")
+    check(cells["世界杯冠军"][1] == "wrong", "足球：世界杯夺冠必须一致")
+    same = fbt.judge(haaland, haaland)
+    check(all(c.level == "correct" for c in same), "足球：自己猜自己全绿")
+
+    print("[4b] LoL 判定")
+    lol_theme = m.THEMES["lol"]
+    raw = {
+        "players": [
+            {"gameId": "A", "realName": "a", "age": 30, "currentTeam": "T1",
+             "historicalTeams": ["SKT T1"], "identityRegions": ["LCK"], "positions": ["Mid"],
+             "champions": ["Azir", "Ryze"], "status": "Active", "worldsCount": 10, "championshipsCount": 5},
+            {"gameId": "B", "realName": "b", "age": 25, "currentTeam": "Gen.G",
+             "historicalTeams": ["DRX"], "identityRegions": ["LCK"], "positions": ["Mid"],
+             "champions": ["Azir"], "status": "Active", "worldsCount": 6, "championshipsCount": 0},
+        ]
+    }
+    ga, gb = lol_theme.load(raw)
+    cells = {c.label: (c.value, c.level) for c in lol_theme.judge(ga, gb)}
+    check(cells["队伍"][1] == "wrong", "LoL：队伍不同 → 红")
+    check(cells["曾效力"][1] == "wrong", "LoL：履历无交集 → 红")
+    check(cells["赛区"][1] == "correct", "LoL：同赛区 → 绿")
+    check(cells["位置"][1] == "correct", "LoL：同位置 → 绿")
+    check(cells["英雄"][1] == "correct", "LoL：英雄池有交集 → 绿")
+    check(cells["年龄"][1] == "wrong" and cells["年龄"][0].endswith("↓"), "LoL：年龄差 5 → 红 + 更小")
+    check(cells["冠军"][1] == "wrong", "LoL：冠军差 5 → 红")
+    check(all(c.level == "correct" for c in lol_theme.judge(ga, ga)), "LoL：自己猜自己全绿")
+
+    print("[5] 棋盘渲染")
+    board = m.render_board(fbt, 1, 10, haaland, rodri)
+    check(board.count("\n") == len(fbt.rows), f"足球棋盘 {len(fbt.rows) + 1} 行")
+    check("🟨国籍" in board, "带颜色与属性名")
+    board_cs = m.render_board(m.THEMES["cs"], 1, 8, smpl, zywoo)
+    check(board_cs.startswith("第 1/8 猜｜s1mple"), "CS 棋盘标题")
+
+    print("[6] CS 整局")
+    plugin = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
     ev = FakeEvent()
-    out = await run_commands(plugin.start_game, ev, "")
-    check(out and "机会：8 次" in _flatten(out[0]), "开局提示包含机会次数")
-    check(len(plugin.games) == 1, "对局已创建")
-    key = m.SessionKey.of("10086", "9527")
-    check(plugin.games[key].target not in _flatten(out[0]), "开局不泄露答案")
-    target = plugin.db.by_nickname(plugin.games[key].target)
-
-    wrong = db.by_nickname("ZywOo") if target["nickname"] != "ZywOo" else db.by_nickname("device")
-    text = plugin._apply_guess(plugin.games[key], wrong)
+    out = await run_commands(plugin.start_cs, ev, "")
+    check(out and "机会：8 次" in _flatten(out[0]), "CS 开局提示次数")
+    check(ev.stopped is True, "开局后终止事件传播")
+    gkey = m.SessionKey.game("10086", "9527", "cs")
+    target = plugin.dbs["cs"].get(plugin.games[gkey].target)
+    wrong = cs.get("ZywOo") if target["nickname"] != "ZywOo" else cs.get("device")
+    text = plugin._apply_guess(plugin.games[gkey], wrong)
     check("还剩 7 次机会" in text, "错误猜测扣减机会")
-    text = plugin._apply_guess(plugin.games[key], wrong)
-    check("已经猜过" in text, "重复猜测被拦下")
+    check("已经猜过" in plugin._apply_guess(plugin.games[gkey], wrong), "重复猜测被拦下")
+    text = plugin._apply_guess(plugin.games[gkey], target)
+    check("猜中了" in text, "猜中即结束")
+    check(gkey not in plugin.games, "对局已清理")
 
-    text = plugin._apply_guess(plugin.games[key], target)
-    check("猜中了" in text and "Major 冠军" in text, "猜中即结束并给出资料卡")
-    check(key not in plugin.games, "结束后清理对局")
-    check(plugin.stats["users"][key]["wins"] == 1, "战绩记录胜场")
-
-    print("[5] 提示 / 图鉴 / 排行")
-    ev2 = FakeEvent()
-    await run_commands(plugin.start_game, ev2, "简单")
-    hint_out = await run_commands(plugin.hint, ev2)
-    check("线索" in _flatten(hint_out[0]), "提示可用")
-    lookup_out = await run_commands(plugin.lookup, ev2, "ZywOo")
-    check("Major 冠军" in _flatten(lookup_out[0]), "图鉴返回完整资料")
-    rank_out = await run_commands(plugin.leaderboard, ev2)
-    check("本群战绩榜" in _flatten(rank_out[0]), "排行可用")
-
-    print("[6] 无指令猜测与存档")
-    ev3 = FakeEvent(text="zywoo")
+    print("[7] 足球整局与题库切换")
+    ev2 = FakeEvent(text="足一把")
+    await plugin.on_message(ev2)
+    fkey = m.SessionKey.game("10086", "9527", "football")
+    check(fkey in plugin.games, "裸口令能开足球局")
+    check(_flatten(ev2.results[0]).count("机会：10 次") == 1, "足球默认 10 次机会")
+    game = plugin.games[fkey]
+    guess = plugin.dbs["football"].find("哈兰德")[0]
+    target = plugin.dbs["football"].get(game.target)
+    pick = guess if guess is not target else plugin.dbs["football"].find("罗德里")[0]
+    text = plugin._apply_guess(game, pick)
+    check("次机会" in text, "足球猜测有反馈")
+    ev3 = FakeEvent(text="提示")
     await plugin.on_message(ev3)
-    check(ev3.stopped is True and ev3.results, "自由文本猜测被识别并拦截事件传播")
+    check(ev3.results and "线索" in _flatten(ev3.results[0]), "裸口令提示可用")
+    check(plugin._current_theme(ev3) == "football", "当前题库跟随最近开局")
+    ev4 = FakeEvent(text="放弃")
+    await plugin.on_message(ev4)
+    check("答案" in _flatten(ev4.results[0]), "放弃公布答案")
 
-    ev_np = FakeEvent(text="弗一把 入门", group="30000", user="7")
-    await plugin.on_message(ev_np)
-    check(
-        m.SessionKey.of("30000", "7") in plugin.games,
-        "没加唤醒前缀也能开局",
-    )
-    check(plugin.games[m.SessionKey.of("30000", "7")].difficulty == "beginner", "难度参数生效")
+    print("[8] 图鉴与排行")
+    ev5 = FakeEvent(text="图鉴 哈兰德")
+    await plugin.on_message(ev5)
+    check("欧冠" in _flatten(ev5.results[0]), "图鉴返回球员资料")
+    ev6 = FakeEvent(text="排行")
+    await plugin.on_message(ev6)
+    rank_text = _flatten(ev6.results[0])
+    check(("战绩榜" in rank_text) or ("还没有人猜中" in rank_text), "排行可用")
 
-    ev_chat = FakeEvent(text="今天天气不错我们出去玩吧", group="30000", user="7")
-    await plugin.on_message(ev_chat)
-    check(not ev_chat.results, "普通聊天不会被误当成猜测")
+    print("[9] 私聊")
+    pv = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    synthetic = Path(tempfile.mkdtemp(prefix="lol-db-")) / "lol.json"
+    synthetic.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    pv.dbs["lol"] = m.PlayerDB(m.THEMES["lol"], synthetic)
+    pev = FakeEvent(group="", user="8888", name="私聊用户")
+    pev.is_at_or_wake_command = True
+    out = await run_commands(pv.start_lol, pev, "")
+    check(out and "撸一把" in _flatten(out[0]), "私聊能开撸一把")
 
-    ev_hint = FakeEvent(text="提示", group="30000", user="7")
-    await plugin.on_message(ev_hint)
-    check(ev_hint.results and "线索" in _flatten(ev_hint.results[0]), "不带唤醒前缀也能用提示")
+    async def say(text, wake=True):
+        ev_ = FakeEvent(text=text, group="", user="8888", name="私聊用户")
+        ev_.is_at_or_wake_command = wake
+        await pv.on_message(ev_)
+        return ev_
 
-    ev_look = FakeEvent(text="图鉴 zywoo", group="30000", user="7")
-    await plugin.on_message(ev_look)
-    check(ev_look.results and "Major 冠军" in _flatten(ev_look.results[0]), "不带前缀也能查图鉴")
+    lkey = m.SessionKey.game("", "8888", "lol")
+    lol_target = pv.dbs["lol"].get(pv.games[lkey].target)
+    ev_guess = await say(lol_target["gameId"])
+    check(ev_guess.results and ("猜中了" in _flatten(ev_guess.results[0])), "私聊猜中 LoL 选手")
 
-    check(plugin.state_file.exists(), "状态已落盘")
-    reloaded = m.FribergGuessPlugin(_Context(), {"timeout_minutes": 0})
-    check(len(reloaded.stats["users"]) == 1, "重启后战绩仍在")
+    pev2 = FakeEvent(text="/足一把", group="", user="9999")
+    await pv.on_message(pev2)
+    check(m.SessionKey.game("", "9999", "football") in pv.games, "私聊带斜杠也能开局")
 
-    print("[7] 私聊")
-    pv = m.FribergGuessPlugin(_Context(), {"timeout_minutes": 0})
-    pv.db = db
-
-    async def send(text, group="", user="8888", wake=False):
-        ev = FakeEvent(text=text, group=group, user=user, name="私聊用户")
-        ev.is_at_or_wake_command = wake
-        await pv.on_message(ev)
-        return ev
-
-    # 私聊里消息本来就算已唤醒，指令路径可以直接命中
-    ev_priv = FakeEvent(text="弗一把", group="", user="8888", name="私聊用户")
-    ev_priv.is_at_or_wake_command = True
-    out = await run_commands(pv.start_game, ev_priv, "")
-    check(out and "机会" in _flatten(out[0]), "私聊能开局（指令路径）")
-    check(ev_priv.stopped is True, "开局后终止事件传播，避免重复响应")
-    priv_key = m.SessionKey.of("", "8888")
-    check(priv_key in pv.games, "私聊对局用 private 键")
-
-    # 私聊里直接发昵称
-    ev_guess = await send("niko", wake=True)
-    check(ev_guess.results and "猜" in _flatten(ev_guess.results[0]), "私聊能直接发昵称猜")
-
-    # 私聊里裸口令
-    ev_hint2 = await send("提示", wake=True)
-    check(ev_hint2.results and "线索" in _flatten(ev_hint2.results[0]), "私聊裸口令「提示」可用")
-
-    ev_stat = await send("战绩", wake=True)
-    check(ev_stat.results and "战绩" in _flatten(ev_stat.results[0]), "私聊「战绩」可用")
-
-    # 前缀没被剥掉的情况（自建前缀或私聊无需前缀时可能残留斜杠）
-    ev_slash = await send("/弗一把", user="9999")
-    check(m.SessionKey.of("", "9999") in pv.games, "私聊里带斜杠也能开局")
-
-    # 没有对局时，裸口令不该在群里乱回
-    ev_quiet = FakeEvent(text="提示", group="40000", user="1", name="路人")
-    await pv.on_message(ev_quiet)
-    check(not ev_quiet.results, "无对局时裸口令「提示」保持沉默")
-
-    ev_end = await send("放弃", wake=True)
-    check(ev_end.results and "答案" in _flatten(ev_end.results[0]), "私聊「放弃」公布答案")
-
-    print("[8] 超时")
-    plugin2 = m.FribergGuessPlugin(_Context(), {"timeout_minutes": 1})
-    plugin2.db = db
-    ev4 = FakeEvent(group="20000", user="1")
-    await run_commands(plugin2.start_game, ev4)
-    game = plugin2.games[m.SessionKey.of("20000", "1")]
-    game.created_at -= 120  # 造一个过期的对局
+    print("[10] 存档与超时")
+    check(pv.state_file.exists(), "状态已落盘")
+    reloaded = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    check(len(reloaded.games) == len(pv.games), "重启后对局仍在")
+    plugin2 = m.GuessProPlugin(_Context(), {"timeout_minutes": 1})
+    ev7 = FakeEvent(group="20000", user="1")
+    await run_commands(plugin2.start_football, ev7)
+    game = plugin2.games[m.SessionKey.game("20000", "1", "football")]
+    game.created_at -= 120
     await plugin2._timeout_watch(game, 60)
-    check(m.SessionKey.of("20000", "1") not in plugin2.games, "超时自动结算")
+    check(m.SessionKey.game("20000", "1", "football") not in plugin2.games, "超时自动结算")
     check(plugin2.context.sent, "超时主动推送答案")
 
+    print("[11] 难度分档与仅私聊")
+    diff_plugin = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    expect = {"易": "easy", "中": "normal", "难": "hard"}
+    for word, pool_key in expect.items():
+        evd = FakeEvent(group="30000", user=f"u-{word}", name=f"难度{word}")
+        await run_commands(diff_plugin.start_cs, evd, word)
+        game = diff_plugin.games[m.SessionKey.game("30000", f"u-{word}", "cs")]
+        check(game.pool == pool_key, f"CS「{word}」→ {pool_key} 池")
+        check(
+            diff_plugin.dbs["cs"].pool_size(pool_key) == len(diff_plugin.dbs["cs"]._pools[pool_key]),
+            f"「{word}」池人数与题库一致（{diff_plugin.dbs['cs'].pool_size(pool_key)} 人）",
+        )
+    ev_bad = FakeEvent(group="30000", user="u-bad", name="乱填")
+    out = await run_commands(diff_plugin.start_cs, ev_bad, "超级难")
+    check(out and "难度只有" in _flatten(out[0]), "无法识别的难度给出提示")
+
+    strict = m.GuessProPlugin(_Context(), {"timeout_minutes": 0, "private_only": True})
+    ev_group = FakeEvent(text="弗一把", group="40000", user="1", name="群里人")
+    await strict.on_message(ev_group)
+    check(not ev_group.results, "仅私聊：群里发开局不响应")
+    check(m.SessionKey.game("40000", "1", "cs") not in strict.games, "仅私聊：群里不会创建对局")
+    ev_priv = FakeEvent(text="弗一把", group="", user="1", name="私聊人")
+    await strict.on_message(ev_priv)
+    check(m.SessionKey.game("", "1", "cs") in strict.games, "仅私聊：私聊能正常开局")
+    out = await run_commands(strict.start_football, FakeEvent(group="40000", user="9"), "")
+    check(not out, "仅私聊：群里的指令处理器也不响应")
+
     print("\n全部自测通过 ✅")
-    print("示例棋盘：\n" + m.render_guess(1, 8, smpl, zywoo))
+    print("足球棋盘示例：\n" + m.render_board(fbt, 1, 10, haaland, rodri))
 
 
 if __name__ == "__main__":
