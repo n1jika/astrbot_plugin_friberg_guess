@@ -22,3 +22,6 @@ data/.valorant_source_cache.json
 # 撸一把补充抓取的缓存与 Liquipedia 基底
 data/.lol_guessassin_cache.json
 data/lol_players.liquipedia.json
+# CS 刷新用的旧快照与 Liquipedia 缓存
+data/players.2026-08-04.json
+data/.cs_liquipedia_cache.json

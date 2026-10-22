@@ -237,7 +237,7 @@ https://github.com/weadee/astrbot_plugin_friberg_guess
 
 | 文件 | 内容 | 来源 |
 | --- | --- | --- |
-| `data/players.json` | 646 位 CS Major 选手 | 社区整理版本（快照 2026-08-04） |
+| `data/players.json` | 646 位 CS Major 选手 | 社区整理版本（快照 2026-08-04）+ [Liquipedia](https://liquipedia.net/counterstrike) 选手页刷新的现队 / 状态 / 角色 / 年龄，用 `tools/enrich_cs_db.py` 更新 |
 | `data/football_players.json` | 1141 位足球球员 | 足一把 `players.js`（2026-27 赛季初） |
 | `data/lol_players.json` | 386 位 LoL 选手（现役 + 知名退役） | [guessassin](https://guessassin.xyz) 的选手接口（战队 / S 赛）+ [Liquipedia](https://liquipedia.net/leagueoflegends) 选手页（真名 / 别名），用 `tools/enrich_lol_db.py` 生成 |
 | `data/valorant_players.json` | 543 位瓦罗兰特选手 | [瓦一把](https://wayiba.com) 站点 `players.generated.json`，用 `tools/build_valorant_db.py` 生成 |
@@ -251,11 +251,61 @@ https://github.com/weadee/astrbot_plugin_friberg_guess
 
 已知数据限制：
 
-- CS 的 `team_history` 当前快照为空，所以「战队」只会 🟩 或 🟥。
+- CS 的 Major 冠军 / 出场次数沿用 2026-08-04 的社区快照；Liquipedia 上这两项是动态模板
+  （`{{Player achievements table}}`）生成的，不逐页展开就拿不到，所以没有跟着刷新。
 - 足球的俱乐部按站点规则：五大联赛显示队名，其它统一显示「非五大联赛」，退役显示「已退役」。
 - LoL 现在只收「现役 + S 赛履历厚的退役」，所以库比原来小很多（386 人）；另一半现役选手没有战队数据（自由人/替补），「战队」格显示 `—`。
 - 瓦罗兰特有 1 个重名标题 `Klaus`（2 条记录），同样只可猜、不作答案，故难档是 541 而非 543。
 - 年龄、队伍、联赛均为快照值，转会后会有偏差，可用 `图鉴` 核对。
+
+## 弗一把题库更新（转会）
+
+转会、退役、转教练都会让旧快照失真，所以加了刷新脚本：
+
+```bash
+python tools/enrich_cs_db.py               # 抓 Liquipedia 并写 data/players.json
+python tools/enrich_cs_db.py --probe       # 只看变动统计，不写文件
+python tools/enrich_cs_db.py --fresh       # 丢掉缓存重新抓一遍
+```
+
+抓的是 [Liquipedia CS2 维基](https://liquipedia.net/counterstrike) 选手页的 `Infobox player`，
+只更新会随时间变的字段：**现队、在役状态、角色、年龄、历史战队**。
+Major 冠军 / 出场次数沿用原快照（见上面的已知限制）。
+
+### 抓错人的几道防线
+
+同名选手很多（两个 Uzi、两个 niko），脚本宁可不更新也不串号：
+
+- 页面 ID 与选手名对不上 → 跳过
+- 同名条目的国籍与原库标注不符 → 跳过
+- 年龄和原库差 4 岁以上 → 跳过
+- **原东家不在该页面的队伍履历里 → 跳过**
+- 抓到消歧义页（`{{for|the Israeli player|xertioN}}`）就用搜索找真正的选手页，再按上面几条校验
+- 现队只认 Infobox 的 `team` 字段；Liquipedia 的 `ex-队名` 表示已离队，不算现队
+- `Active` 但没写队伍的老将不判成「复出」，保留原库的退役状态
+
+### 这次刷出来的变动（对比 2026-08-04 快照）
+
+命中 621 / 646 人，共 115 处变动。一线部分：
+
+| 选手 | 原 | 现 |
+| --- | --- | --- |
+| s1mple · Magisk · mzinho · taz | BC.Game | BC.Game Esports |
+| Ax1le · BELCHONOKK · fame · nafany | TDK | 1w Team |
+| snappi | Ninjas in Pyjamas | HEROIC（并转为教练） |
+| cmtry | FUT Esports | Astralis |
+| adamb | OG | Ninjas in Pyjamas |
+| Graviti · Lucky · MaKa · misutaaa | 3DMAX | ENVY |
+| nin9 | The Huns Esports | The MongolZ |
+| br0 | Eternal Fire | Monte |
+| Qikert | 1w Team | Team Spirit Academy |
+
+- **退役**：RpK
+- **复出**：autimatic（Without a Roof）、friberg（Johnny Speeds）、oskar（SINNERS Esports）、fox（SAW）
+- 中国选手：C4LLM3SU3 → Lynn Vision、dank1ng → TYLOO、kaze / childking → Rare Atom
+
+顺带把「历史战队」填上了（620 人有数据），所以**「战队」格现在会亮 🟨**：
+猜的队伍是答案选手效力过的老东家，就算接近。
 
 ## 撸一把题库
 

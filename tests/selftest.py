@@ -211,8 +211,30 @@ async def main() -> None:
     cells = {c.label: (c.value, c.level) for c in m.THEMES["cs"].judge(smpl, zywoo)}
     check(cells["国家"][1] == "close", "CS：不同国家同赛区 → 黄")
     check(cells["战队"][1] == "wrong", "CS：战队不同 → 红")
-    check(cells["年龄"] == ("28↓", "close"), "CS：年龄差 3 → 黄 + 更小")
+    # 年龄随年份变，别写死：只要 s1mple 比 ZywOo 大，方向就是 ↓
+    check(
+        smpl["age"] > zywoo["age"] and cells["年龄"][0] == f"{smpl['age']}↓",
+        f"CS：年龄 s1mple {smpl['age']} vs ZywOo {zywoo['age']} → 更小 {cells['年龄']}",
+    )
     check(cells["冠军"] == ("1↑", "wrong"), "CS：冠军差 2 → 红 + 更大")
+
+    # 战队：同队绿、效力过对方现队黄（历史战队来自 Liquipedia，转会后才判得出来）
+    raw_cs = {
+        "players": [
+            {"nickname": "A", "nationality": "法国", "region": "欧洲", "team": "Team Vitality",
+             "team_history": ["Team Liquid"], "age": 25, "role": "Rifler",
+             "major_championships": 1, "major_appearances": 5, "is_active": True},
+            {"nickname": "B", "nationality": "法国", "region": "欧洲", "team": "FaZe Clan",
+             "team_history": ["Team Vitality", "G2 Esports"], "age": 25, "role": "AWPer",
+             "major_championships": 1, "major_appearances": 5, "is_active": True},
+        ]
+    }
+    ca, cb = m.THEMES["cs"].load(raw_cs)
+    tc = {c.label: (c.value, c.level) for c in m.THEMES["cs"].judge(ca, cb)}
+    check(tc["战队"] == ("Team Vitality", "close"), f"CS：效力过对方现队 → 黄（{tc['战队']}）")
+    check(tc["国家"][1] == "correct" and tc["位置"][1] == "wrong", "CS：同国家绿 / 不同位置红")
+    check(sum(1 for p in cs.players if p.get("team_history")) >= 500,
+          f"CS 题库带历史战队（{sum(1 for p in cs.players if p.get('team_history'))} 人）")
 
     print("[4] 足球判定")
     fbt = m.THEMES["football"]
