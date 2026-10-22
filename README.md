@@ -70,13 +70,14 @@ Bot ：第 1/10 猜｜哈兰德（Erling Haaland）
 
 ### 弗一把的默认池：最火 200 人
 
-不带难度发 `弗一把`，题目就从「最火 200 人」里出：
+不带难度发 `弗一把`，**答案**从「最火 200 人」里出；**题库仍是 646 人** —— 猜谁都可以，
+池外那 446 人照样能提交、照样有棋盘反馈，只是不会成为答案。
 
 - **135 位点名名单**：s1mple、ZywOo、NiKo、device、dupreeh、olofmeister、GeT-RiGhT、f0rest、
   NEO、markeloff、coldzera、FalleN、karrigan、donk、m0NESY、Twistzz、EliGE、Stewie2K……
-- **65 位按履历补齐**：先限定题库自带的「知名」标签，再按 Major 冠军数 > 出场届数 > 是否现役排序。
+- **65 位按履历补齐**：只看 Major 冠军数 > 出场届数 > 是否现役，不做「冷门/热门」的主观筛选。
 - **教练不算答案**：题库里有 76 条教练记录，默认池全部排除，避免出现「猜中了也想不到」的情况。
-- 实际构成：现役 166 / 退役 34；拿过 Major 冠军的 68 人（其中 22 人多冠）；Rifler 155 / AWPer 45；
+- 实际构成：现役 151 / 退役 49；拿过 Major 冠军的 69 人（其中 22 人多冠）；Rifler 155 / AWPer 45；
   含 8 位中国选手（JamYoung、somebody、Summer、Westmelon 等）。
 
 想更难就用 `弗一把 中`（主流 384）或 `弗一把 难`（全部 646）。名单在 `main.py` 的 `CS_FAMOUS`，

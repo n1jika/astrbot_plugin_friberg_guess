@@ -438,6 +438,29 @@ async def main() -> None:
     cs_text = _flatten(cs_start[0])
     check("最火 200 人" in cs_text, f"弗一把开局写明 200 人：{cs_text.splitlines()[1]}")
 
+    print("[15] 答案是 200 人之一，但题库仍是 646 人（可猜任何人）")
+    cs_all = fb_plugin.dbs["cs"]
+    check(len(cs_all.players) == 646, f"预选题库仍是 646 人（{len(cs_all.players)}）")
+    hot_names = {p["nickname"] for p in cs_all.pool("easy")}
+
+    # 抽 30 局，答案必须全部落在 200 人池内
+    targets = set()
+    for i in range(30):
+        uid = f"pool-{i}"
+        await run_commands(fb_plugin.start_cs, FakeEvent(group="70000", user=uid), "")
+        game_ = fb_plugin.games.get(m.SessionKey.game("70000", uid, "cs"))
+        if game_:
+            targets.add(game_.target)
+    check(targets and targets <= hot_names, f"30 局答案都来自 200 人池（取了 {len(targets)} 个不同答案）")
+
+    # 池外选手照样能猜，并给出棋盘
+    outside = sorted(p["nickname"] for p in cs_all.players if p["nickname"] not in hot_names)
+    check(len(outside) == 446, f"池外仍有 446 人可猜（{len(outside)}）")
+    ev_out = FakeEvent(text=outside[0], group="70000", user="outside", name="池外人")
+    await run_commands(fb_plugin.start_cs, FakeEvent(group="70000", user="outside"), "")
+    await fb_plugin.on_message(ev_out)
+    check(ev_out.results and "第 1/" in _flatten(ev_out.results[0]), f"池外选手 {outside[0]} 能正常猜")
+
     print("\n全部自测通过 ✅")
     print("足球棋盘示例：\n" + m.render_board(fbt, 1, 10, haaland, rodri))
 

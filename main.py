@@ -703,10 +703,10 @@ def _cs_famous_pool(players: list[dict], limit: int = 200) -> list[dict]:
         return picked[:limit]
 
     seen = {p["nickname"] for p in picked}
-    # 先补题库自带的「知名」标签，再考虑其他人；同档内按 Major 履历排
+    # 补齐只看 Major 履历，不做主观「冷门」判断
     rest = sorted(
         (p for p in roster if p["nickname"] not in seen),
-        key=lambda p: (1 if "beginner" in (p.get("difficulties") or []) else 0,) + _cs_fame_score(p),
+        key=_cs_fame_score,
         reverse=True,
     )
     return picked + rest[: limit - len(picked)]
