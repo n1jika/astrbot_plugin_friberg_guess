@@ -388,7 +388,7 @@ class FootballTheme(Theme):
 
 
 class LolTheme(Theme):
-    """LoL 职业选手（按站点棋盘列的语义复刻）。"""
+    """LoL 职业选手（数据来自 Liquipedia 的 Infobox player）。"""
 
     key = "lol"
     command = "撸一把"
@@ -397,7 +397,7 @@ class LolTheme(Theme):
     icon = "🖱"
     db_file = "lol_players.json"
     attempts = 8
-    rows = ((0, 1), (2, 3), (4, 5), (6, 7, 8))
+    rows = ((0, 1), (2, 3), (4,))
     pool_alias = {
         "易": "easy", "简单": "easy", "easy": "easy",
         "中": "normal", "普通": "normal", "标准": "normal", "normal": "normal",
@@ -412,35 +412,35 @@ class LolTheme(Theme):
             if not p.get("gameId"):
                 continue
             p = dict(p)
-            p["_teams"] = _as_list(p.get("historicalTeams"))
-            p["_regions"] = _as_list(p.get("identityRegions")) or _as_list(p.get("region"))
-            p["_positions"] = _as_list(p.get("positions"))
-            p["_champions"] = _as_list(p.get("champions"))
+            positions = p.get("positions")
+            p["_positions"] = positions if isinstance(positions, list) else [str(positions or "—")]
+            p["_team"] = (p.get("currentTeam") or "").strip()
+            p["_country"] = (p.get("country") or "").strip()
+            p["_continent"] = (p.get("continent") or "").strip()
             out.append(p)
         return out
 
     def keys_of(self, player: dict) -> set[str]:
-        return {player.get("gameId", ""), player.get("realName", "")}
+        keys = {player.get("gameId", ""), player.get("realName", "")}
+        keys.update(player.get("aliases") or [])
+        return {k for k in keys if k}
 
     def title_of(self, player: dict) -> str:
         return player["gameId"]
 
     def pools(self, players: list[dict]) -> dict[str, list[dict]]:
-        stars = [
-            p
-            for p in players
-            if (p.get("championshipsCount") or 0) > 0 or (p.get("worldsCount") or 0) >= 3
-        ]
         active = [p for p in players if str(p.get("status", "")).lower().startswith("act")]
+        # 中韩选手是中文玩家最眼熟的一批，作为「易」档
+        cnkr = [p for p in players if p.get("country") in {"韩国", "中国", "中国台湾", "中国香港", "中国澳门"}]
         return {
-            "easy": stars or active or players,
+            "easy": cnkr or active or players,
             "normal": active or players,
             "hard": players,
         }
 
     def pool_label(self, pool: str) -> str:
         return {
-            "easy": "易（有世界赛/冠军履历）",
+            "easy": "易（中韩选手）",
             "normal": "中（现役选手）",
             "hard": "难（全部，含退役）",
         }.get(pool, pool)
@@ -448,44 +448,29 @@ class LolTheme(Theme):
     def judge(self, guess: dict, target: dict) -> list[Cell]:
         cells: list[Cell] = []
 
-        # 队伍：相同=一致；曾效力过对方现队=接近
-        g_team, t_team = guess.get("currentTeam"), target.get("currentTeam")
-        if g_team and g_team == t_team:
-            cells.append(Cell("队伍", g_team, "correct"))
-        elif g_team in target.get("_teams", []):
-            cells.append(Cell("队伍", g_team or "—", "close"))
-        else:
-            cells.append(Cell("队伍", g_team or "—", "wrong"))
+        # 位置（有交集就算一致）
+        g_pos = set(guess.get("_positions") or [])
+        same_pos = bool(g_pos & set(target.get("_positions") or []))
+        cells.append(Cell("位置", "/".join(guess.get("_positions") or ["—"]), "correct" if same_pos else "wrong"))
 
-        # 曾效力：有交集=一致
-        shared = set(guess.get("_teams", [])) & set(target.get("_teams", []))
-        cells.append(Cell("曾效力", f"{len(shared)} 队" if shared else "无交集", "correct" if shared else "wrong"))
-
-        # 赛区身份
-        g_regions = set(guess.get("_regions", []))
-        if g_regions & set(target.get("_regions", [])):
-            cells.append(Cell("赛区", " ".join(sorted(g_regions)) or "—", "correct"))
+        # 国家：相同=一致，同大洲=接近
+        g_country, t_country = guess.get("_country", ""), target.get("_country", "")
+        if g_country and g_country == t_country:
+            cells.append(Cell("国家", g_country, "correct"))
+        elif guess.get("_continent") and guess.get("_continent") == target.get("_continent"):
+            cells.append(Cell("国家", g_country or "—", "close"))
         else:
-            cells.append(Cell("赛区", " ".join(sorted(g_regions)) or "—", "wrong"))
+            cells.append(Cell("国家", g_country or "—", "wrong"))
 
-        # 位置
-        if set(guess.get("_positions", [])) & set(target.get("_positions", [])):
-            cells.append(Cell("位置", " ".join(guess.get("_positions", [])) or "—", "correct"))
-        else:
-            cells.append(Cell("位置", " ".join(guess.get("_positions", [])) or "—", "wrong"))
+        # 大洲
+        same_continent = bool(guess.get("_continent")) and guess.get("_continent") == target.get("_continent")
+        cells.append(Cell("大洲", guess.get("_continent") or "—", "correct" if same_continent else "wrong"))
 
         # 年龄 ±2
         cells.append(_diff_cell("年龄", int(guess.get("age") or 0), int(target.get("age") or 0), 2))
 
-        # 英雄池：有交集=一致
-        g_champs = set(guess.get("_champions", []))
-        shared_champs = g_champs & set(target.get("_champions", []))
-        cells.append(
-            Cell("英雄", f"{len(shared_champs)} 个重合" if shared_champs else "无交集", "correct" if shared_champs else "wrong")
-        )
-
         # 状态
-        same_status = (guess.get("status") or "") == (target.get("status") or "")
+        same_status = str(guess.get("status", "")).lower() == str(target.get("status", "")).lower()
         cells.append(
             Cell(
                 "状态",
@@ -493,32 +478,28 @@ class LolTheme(Theme):
                 "correct" if same_status else "wrong",
             )
         )
-
-        # 世界赛出场 ±1
-        cells.append(_diff_cell("世界赛", int(guess.get("worldsCount") or 0), int(target.get("worldsCount") or 0), 1))
-        # 冠军数 ±1
-        cells.append(
-            _diff_cell("冠军", int(guess.get("championshipsCount") or 0), int(target.get("championshipsCount") or 0), 1)
-        )
         return cells
 
     def card(self, player: dict) -> str:
         status = "现役" if str(player.get("status", "")).lower().startswith("act") else "退役"
-        return (
-            f"📇 {player['gameId']}（{player.get('realName', '—')}，{status}）\n"
-            f"{player.get('currentTeam', '—')} · {'/'.join(player.get('_regions', [])) or '—'} · "
-            f"{'/'.join(player.get('_positions', [])) or '—'} · {player.get('age', '—')} 岁\n"
-            f"🏆 世界赛 {player.get('worldsCount', 0)} 次 · 冠军 {player.get('championshipsCount', 0)} 次"
-        )
+        where = player.get("_country") or "—"
+        if player.get("_continent"):
+            where += f"（{player['_continent']}）"
+        parts = [
+            player.get("_team") or "",
+            where,
+            "/".join(player.get("_positions") or ["—"]),
+            f"{player.get('age', '—')} 岁",
+        ]
+        return f"📇 {player['gameId']}（{player.get('realName') or '—'}，{status}）\n" + " · ".join(p for p in parts if p)
 
     def hints(self, player: dict) -> list[tuple[str, str]]:
         return [
-            ("赛区", "/".join(player.get("_regions", [])) or "—"),
-            ("位置", "/".join(player.get("_positions", [])) or "—"),
+            ("位置", "/".join(player.get("_positions") or ["—"])),
+            ("国家", player.get("_country") or "—"),
+            ("大洲", player.get("_continent") or "—"),
             ("年龄", f"{player.get('age', '—')} 岁"),
             ("状态", "现役" if str(player.get("status", "")).lower().startswith("act") else "退役"),
-            ("世界赛", f"{player.get('worldsCount', 0)} 次"),
-            ("冠军", f"{player.get('championshipsCount', 0)} 次"),
         ]
 
 

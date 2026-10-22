@@ -11,10 +11,7 @@
 | --- | --- | --- | --- | --- |
 | `弗一把` | CS Major 选手 | 646 | 8 | 国家 · 赛区 · 战队 · 年龄 · 位置 · Major 冠军 · 出场 · 状态 |
 | `足一把` | 足球球员 | 1141 | 10 | 国籍 · 联赛 · 俱乐部 · 位置 · 出生年 · 号码 · 欧冠 · 世界杯届数 · 世界杯冠军 |
-| `撸一把` | LoL 职业选手 | 需自行抓取* | 8 | 队伍 · 曾效力 · 赛区 · 位置 · 年龄 · 英雄池 · 状态 · 世界赛 · 冠军 |
-
-\* 撸一把的题库在站点服务端，仓库里没有预置数据。抓法见下文「撸一把题库」一节；
-没抓之前 `/撸一把` 会提示你先跑脚本，插件其它部分不受影响。
+| `撸一把` | LoL 职业选手 | 2427 | 8 | 位置 · 国家 · 大洲 · 年龄 · 状态 |
 
 ## 玩法示例
 
@@ -43,7 +40,7 @@ Bot ：第 1/10 猜｜哈兰德（Erling Haaland）
 
 - **CS**：同赛区算国家接近；曾效力过答案所在战队算战队接近；年龄 ±3；冠军/出场 ±1
 - **足球**：同大洲算国籍接近（双国籍互认直接算对）；出生年 ±2；号码 ±2；欧冠 ±1；世界杯届数 ±1；世界杯夺冠数必须一致
-- **LoL**：曾效力过对方的现队算队伍接近；曾效力/赛区/位置/英雄池有交集即一致；年龄 ±2；世界赛/冠军 ±1
+- **LoL**：位置、状态相同才算一致；国家相同为绿、同大洲为黄；年龄 ±2
 
 ## 指令
 
@@ -64,9 +61,9 @@ Bot ：第 1/10 猜｜哈兰德（Erling Haaland）
 
 | 难度 | CS | 足球 | LoL |
 | --- | --- | --- | --- |
-| `易` | 知名选手 322 人 | 有欧战/世界杯履历 390 人 | 有世界赛/冠军履历 |
-| `中` | 主流选手 384 人 | 核心球员 693 人 | 现役选手 |
-| `难` | 全部 646 人 | 全部 1141 人（含联赛扩容） | 全部（含退役） |
+| `易` | 知名选手 322 人 | 有欧战/世界杯履历 390 人 | 中韩选手 752 人 |
+| `中` | 主流选手 384 人 | 核心球员 693 人 | 现役选手 1929 人 |
+| `难` | 全部 646 人 | 全部 1141 人（含联赛扩容） | 全部 2427 人（含退役） |
 
 用法：`弗一把 难`、`足一把 易`、`撸一把 中`。旧难度词仍然兼容：`入门`→易、
 `简单`→中、`普通`/`地狱`→难。
@@ -119,7 +116,7 @@ https://github.com/weadee/astrbot_plugin_friberg_guess
 | --- | --- | --- |
 | `data/players.json` | 646 位 CS Major 选手 | 社区整理版本（快照 2026-08-04） |
 | `data/football_players.json` | 1141 位足球球员 | 足一把 `players.js`（2026-27 赛季初） |
-| `data/lol_players.json` | LoL 职业选手 | 用 `tools/crawl_lol.py` 从 guessassin 公开检索接口抓取（需自己跑） |
+| `data/lol_players.json` | LoL 职业选手 | [Liquipedia](https://liquipedia.net/leagueoflegends) 选手页 Infobox，用 `tools/build_lol_db.py` 生成 |
 
 - CS 判定口径参照开源项目 [csgofriberg](https://github.com/shnlfriberg/csgofriberg)（AGPL-3.0）。
 - 足球判定口径参照 [足一把](https://www.zuyiba.net) 页面里的 `compare` 实现。
@@ -135,16 +132,21 @@ https://github.com/weadee/astrbot_plugin_friberg_guess
 
 ## 撸一把题库
 
-撸一把的选手库没有公开的整包文件，只能通过站点公开的检索接口逐个查，所以放进
-`tools/crawl_lol.py` 里，按需自己抓：
+数据来自 [Liquipedia](https://liquipedia.net/leagueoflegends) 的选手页（`Infobox player`），
+字段是 ID、真名、出生日期、国籍、位置、状态、别名。想更新就重跑脚本：
 
 ```bash
-python tools/crawl_lol.py           # 断点续抓，Ctrl+C 随时可停
-python tools/crawl_lol.py --reset   # 清空进度重抓
+python tools/build_lol_db.py              # 断点续抓，缓存在 data/.lol_liquipedia_cache.json
+python tools/build_lol_db.py --limit 300  # 只抓前 300 页试水
+python tools/build_lol_db.py --reset      # 清空进度重抓
 ```
 
-脚本会写 `data/lol_players.json`，每抓完一层就落一次盘，中断不白跑；写完重启插件即可。
-实测覆盖偏主流选手（站点检索是模糊匹配、单次最多 20 条），冷门选手可能抓不到。
+脚本遵守 Liquipedia 的规则：请求间隔 ≥2 秒、带可识别的 User-Agent、只读公开页面。
+国籍到中文名 / 大洲的映射写在脚本里，遇到没收录的国家会保留英文名、大洲留空。
+
+> 为什么 LoL 只有 5 项属性：Liquipedia 的 infobox 里 `team` / `region` 大多为空
+> （队伍与赛区靠站内的 Cargo 表渲染，API 不直接给），所以没有做「队伍」「赛区」格；
+> `teams` 字段全量覆盖率不到 4%，放进去会让两两比较大面积假绿。
 
 ## 自测
 

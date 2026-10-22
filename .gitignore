@@ -12,3 +12,6 @@ state.json
 
 # 抓取脚本的进度文件
 data/.lol_crawl_state.json
+
+# Liquipedia 抓取缓存
+data/.lol_liquipedia_cache.json

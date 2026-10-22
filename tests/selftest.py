@@ -187,7 +187,7 @@ async def main() -> None:
     lol_path = ROOT / "data" / "lol_players.json"
     if lol_path.exists():
         lol_db = m.PlayerDB(m.THEMES["lol"], lol_path)
-        check(len(lol_db.players) >= 50, f"LoL 题库 {len(lol_db.players)} 人")
+        check(len(lol_db.players) >= 500, f"LoL 题库 {len(lol_db.players)} 人")
     else:
         print("  · LoL 题库未导入（data/lol_players.json 缺失），本次跳过")
 
@@ -226,23 +226,19 @@ async def main() -> None:
     lol_theme = m.THEMES["lol"]
     raw = {
         "players": [
-            {"gameId": "A", "realName": "a", "age": 30, "currentTeam": "T1",
-             "historicalTeams": ["SKT T1"], "identityRegions": ["LCK"], "positions": ["Mid"],
-             "champions": ["Azir", "Ryze"], "status": "Active", "worldsCount": 10, "championshipsCount": 5},
-            {"gameId": "B", "realName": "b", "age": 25, "currentTeam": "Gen.G",
-             "historicalTeams": ["DRX"], "identityRegions": ["LCK"], "positions": ["Mid"],
-             "champions": ["Azir"], "status": "Active", "worldsCount": 6, "championshipsCount": 0},
+            {"gameId": "A", "realName": "a", "age": 30, "currentTeam": "T1", "country": "韩国",
+             "continent": "亚洲", "positions": ["中单"], "status": "Active"},
+            {"gameId": "B", "realName": "b", "age": 25, "currentTeam": "Gen.G", "country": "中国",
+             "continent": "亚洲", "positions": ["上单"], "status": "Retired"},
         ]
     }
     ga, gb = lol_theme.load(raw)
     cells = {c.label: (c.value, c.level) for c in lol_theme.judge(ga, gb)}
-    check(cells["队伍"][1] == "wrong", "LoL：队伍不同 → 红")
-    check(cells["曾效力"][1] == "wrong", "LoL：履历无交集 → 红")
-    check(cells["赛区"][1] == "correct", "LoL：同赛区 → 绿")
-    check(cells["位置"][1] == "correct", "LoL：同位置 → 绿")
-    check(cells["英雄"][1] == "correct", "LoL：英雄池有交集 → 绿")
+    check(cells["位置"][1] == "wrong", "LoL：位置不同 → 红")
+    check(cells["国家"][1] == "close", "LoL：不同国家同大洲 → 黄")
+    check(cells["大洲"][1] == "correct", "LoL：同大洲 → 绿")
     check(cells["年龄"][1] == "wrong" and cells["年龄"][0].endswith("↓"), "LoL：年龄差 5 → 红 + 更小")
-    check(cells["冠军"][1] == "wrong", "LoL：冠军差 5 → 红")
+    check(cells["状态"][1] == "wrong", "LoL：现役 vs 退役 → 红")
     check(all(c.level == "correct" for c in lol_theme.judge(ga, ga)), "LoL：自己猜自己全绿")
 
     print("[5] 棋盘渲染")
