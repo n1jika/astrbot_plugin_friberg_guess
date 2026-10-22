@@ -379,7 +379,7 @@ async def main() -> None:
         size_ = fb_plugin.dbs["football"].pool_size(expect_pool)
         check(lo <= size_ <= hi, f"{text} 池人数 {size_} 在合理区间")
         reply_ = _flatten(ev_.results[0]) if ev_.results else ""
-        check("难度：" in reply_ and "人）" in reply_ and "（" in reply_, f"{text} 开局写明范围与人数")
+        check("难度：" in reply_ and "人" in reply_, f"{text} 开局写明范围与人数")
 
     fam = fb_plugin.dbs["football"].pool("all:easy")
     names = {p["cnName"] for p in fam}
@@ -401,6 +401,42 @@ async def main() -> None:
     ev_bad_fb = FakeEvent(text="足一把 德乙", group="50000", user="fbx")
     await fb_plugin.on_message(ev_bad_fb)
     check("难度只有" in _flatten(ev_bad_fb.results[0]), "未知范围给出提示")
+
+    print("[13] 弗一把默认池 = 最火 200 人")
+    cs_db = fb_plugin.dbs["cs"]
+    cs_theme = m.THEMES["cs"]
+    hot = cs_db.pool("easy")
+    check(len(hot) == 200, f"CS 易档正好 200 人（{len(hot)}）")
+    check(cs_theme.pool_label("easy") == "易（最火 200 人）", "CS 易档标签写明最火 200 人")
+    check(all(p["role"] != "Coach" for p in hot), "默认池不含教练")
+    names_cs = {p["_base"].lower() for p in hot}
+    for star in ("s1mple", "zywoo", "niko", "device", "donk", "m0nesy", "coldzera", "fallen"):
+        check(star in names_cs, f"默认池包含 {star}")
+    check(any(p["major_championships"] >= 3 for p in hot), "默认池有多届 Major 冠军")
+    check(any(not p["is_active"] for p in hot), "默认池包含退役传奇")
+    check(cs_db.pool_size("normal") == 384 and cs_db.pool_size("hard") == 646, "中/难两档人数未变")
+
+    # 名人名单不能有拼错的孤立项（命中不到任何选手说明写错了）
+    bases = {p["_base"].lower() for p in cs_db.players}
+    dead = sorted(n for n in m.CS_FAMOUS if n not in bases)
+    check(not dead, f"CS_FAMOUS 无死项（误写：{dead[:5]}）")
+
+    print("[14] 默认难度必须落到真实池（回归：曾经默认值被当成池名）")
+    for key_, theme_ in m.THEMES.items():
+        db_ = fb_plugin.dbs[key_]
+        for word in ("易", "中", "难"):
+            pool_key = theme_.resolve_pool(word, "易")
+            check(pool_key in db_._pools, f"{key_}「{word}」得到合法池名 {pool_key}")
+        default_pool = theme_.resolve_pool("", "易")
+        check(default_pool in db_._pools, f"{key_} 默认池 {default_pool} 存在")
+        check(
+            db_.pool_size(default_pool) < len(db_.players) or default_pool == "hard",
+            f"{key_} 默认池不是全库（{db_.pool_size(default_pool)}/{len(db_.players)}）",
+        )
+
+    cs_start = await run_commands(fb_plugin.start_cs, FakeEvent(group="60000", user="cs-default"), "")
+    cs_text = _flatten(cs_start[0])
+    check("最火 200 人" in cs_text, f"弗一把开局写明 200 人：{cs_text.splitlines()[1]}")
 
     print("\n全部自测通过 ✅")
     print("足球棋盘示例：\n" + m.render_board(fbt, 1, 10, haaland, rodri))

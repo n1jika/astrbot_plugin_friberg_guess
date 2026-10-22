@@ -143,8 +143,13 @@ class Theme:
     def resolve_pool(self, raw: str, default: str) -> str | None:
         """把用户输入的难度词转成 pool key；无法识别返回 None。"""
         token = (raw or "").strip().split()[0] if (raw or "").strip() else ""
-        if not token:
-            return default if default in self.pool_alias else self.default_pool
+        if not token:  # 没写难度：把配置里的默认值也换算成 pool key
+            word = (default or "").strip()
+            return (
+                self.pool_alias.get(word)
+                or self.pool_alias.get(word.lower())
+                or self.default_pool
+            )
         return self.pool_alias.get(token) or self.pool_alias.get(token.lower())
 
 
@@ -192,17 +197,17 @@ class CSTheme(Theme):
         return player["nickname"]
 
     def pools(self, players: list[dict]) -> dict[str, list[dict]]:
-        beginner = [p for p in players if "beginner" in (p.get("difficulties") or [])]
+        hottest = _cs_famous_pool(players)
         mainstream = [p for p in players if "easy" in (p.get("difficulties") or [])]
         return {
-            "easy": beginner or mainstream or players,
+            "easy": hottest,
             "normal": mainstream or players,
             "hard": players,
         }
 
     def pool_label(self, pool: str) -> str:
         return {
-            "easy": "易（知名选手）",
+            "easy": "易（最火 200 人）",
             "normal": "中（主流选手）",
             "hard": "难（全部选手）",
         }.get(pool, pool)
@@ -268,6 +273,28 @@ class CSTheme(Theme):
 TOP5_LEAGUES = {"英超", "西甲", "德甲", "意甲", "法甲"}
 
 # 「易」档用的热门球队（名单与题库里的队名一致）
+# 「最火」的 CS 选手名单（按主体名比对，忽略括号后缀）。只用于挑人物，不参与判定。
+CS_FAMOUS = {
+    # 传奇 / GOAT 级
+    "s1mple", "zywoo", "niko", "device", "dupreeh", "xyp9x", "gla1ve", "magisk", "olofmeister",
+    "get-right", "f0rest", "neo", "taz", "markeloff", "edward", "zeus", "seized", "flamie",
+    "boombl4", "adren", "hobbit", "ax1le", "sh1ro", "donk", "m0nesy", "kjaerbye", "jw", "flusha",
+    "krimz", "pronax", "xizt", "friberg", "dennis", "rez", "brollan", "draken",
+    # 现役顶级
+    "ropz", "twistzz", "naf", "elige", "stewie2k", "autimatic", "brehze", "tarik", "nitr0",
+    "coldzera", "fallen", "fer", "fnx", "taco", "kscerato", "yuurih", "snax", "byali",
+    "pashabiceps", "karrigan", "rain", "broky", "frozen", "torzsi", "siuhy", "jimpphat", "xertion",
+    "apex", "shox", "kennys", "scream", "bodyy", "spinx", "flamez", "mezii", "rpk",
+    "snappi", "sunpayus", "maden", "nertz", "hades", "sdy", "jl", "im", "aleksib", "b1t", "w0nderful",
+    "electronic", "perfecto", "chopper", "zont1x", "cadian", "stavn", "jabbi", "teses", "sjuush",
+    "blamef", "k0nfig", "refrezh", "art", "yekindar", "jame", "qikert", "grim", "rush", "boltz",
+    "hunter-", "nexa", "jks", "hooxi", "xantares", "woxic", "calyx", "maj3r", "attacker", "summer",
+    "somebody", "jamyoung", "westmelon", "kaze", "buster", "keoz", "kylar", "nbk-", "kioshima",
+    "ex6tenz", "smithzz", "sixer", "jackz", "amanek", "lucky", "liazz", "azr", "gratisfaction",
+    "ustilo", "rickeh", "malta", "get-right", "guardian", "dosia", "skadoodle", "fifflaren",
+    "cajunb", "msl", "pyth", "delpan",
+}
+
 BIG_CLUBS = {
     # 英超
     "曼城", "利物浦", "阿森纳", "曼联", "切尔西", "热刺", "纽卡斯尔联", "阿斯顿维拉",
@@ -655,6 +682,34 @@ def _league_easy(pool: list[dict], famous: list[dict], limit: int = 150) -> list
                 seen.add(key)
                 picked.append(p)
     return picked[:limit] or pool
+
+
+def _cs_fame_score(player: dict) -> tuple:
+    """CS 选手的「火」程度：Major 冠军 > 出场数 > 现役 > 是否在名人名单。"""
+    return (
+        1 if (player.get("_base") or "").lower() in CS_FAMOUS else 0,
+        int(player.get("major_championships") or 0),
+        int(player.get("major_appearances") or 0),
+        1 if player.get("is_active") else 0,
+    )
+
+
+def _cs_famous_pool(players: list[dict], limit: int = 200) -> list[dict]:
+    """最火的 200 人：名人名单打底，再按 Major 履历补齐；教练不作为答案。"""
+    roster = [p for p in players if p.get("role") != "Coach"]
+    picked = [p for p in roster if (p.get("_base") or "").lower() in CS_FAMOUS]
+    if len(picked) >= limit:
+        picked.sort(key=_cs_fame_score, reverse=True)
+        return picked[:limit]
+
+    seen = {p["nickname"] for p in picked}
+    # 先补题库自带的「知名」标签，再考虑其他人；同档内按 Major 履历排
+    rest = sorted(
+        (p for p in roster if p["nickname"] not in seen),
+        key=lambda p: (1 if "beginner" in (p.get("difficulties") or []) else 0,) + _cs_fame_score(p),
+        reverse=True,
+    )
+    return picked + rest[: limit - len(picked)]
 
 
 def _as_list(value: Any) -> list[str]:
@@ -1116,9 +1171,13 @@ class GuessProPlugin(Star):
             if k != theme.key and self._enabled(k) and self.dbs[k].players
         )
         tail = f"\n其它题库：{others}" if others else ""
+        label = theme.pool_label(game.pool)
+        size = db.pool_size(game.pool)
+        # 标签里已经带了人数就不再重复（如「易（最火 200 人）」）
+        counter = "" if re.search(r"\d+\s*人", label) else f"（{size} 人）"
         return (
             f"{theme.icon} {theme.command} · 猜{theme.label}\n"
-            f"难度：{theme.pool_label(game.pool)}（{db.pool_size(game.pool)} 人）"
+            f"难度：{label}{counter}"
             f"｜机会：{game.attempts} 次{limit}\n"
             f"直接发选手名就能猜（大小写不限，可以只写前几个字母）\n"
             f"其它指令：提示 · 放弃 · 战绩 · 排行 · 图鉴 <名字>{tail}\n"
