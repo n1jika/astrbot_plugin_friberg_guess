@@ -375,10 +375,10 @@ class FootballTheme(Theme):
         return f"{cn}（{player['name']}）" if cn and cn != player["name"] else player["name"]
 
     def pools(self, players: list[dict]) -> dict[str, list[dict]]:
-        famous = _famous_pool(players)
+        famous = _easy_pool(players)
         top5 = [p for p in players if p.get("league") in TOP5_LEAGUES]
         out = {
-            # 全库：易=最出名的 200 人（含退役巨星与小联赛巨星），中=五大联赛，难=全部
+            # 全库：易=知名 200 人 + 豪门全员，中=五大联赛，难=全部
             "all:easy": famous,
             "all:normal": top5 or players,
             "all:hard": players,
@@ -392,7 +392,7 @@ class FootballTheme(Theme):
             pool = [p for p in players if p.get("league") == league]
             famous_league = [p for p in famous if p.get("league") == league]
             hot_league = [p for p in pool if p.get("club") in BIG_CLUBS]
-            out[f"{key}:easy"] = famous_league if len(famous_league) >= 40 else (hot_league or pool)
+            out[f"{key}:easy"] = famous_league or hot_league or pool
             out[f"{key}:normal"] = pool
             out[f"{key}:hard"] = pool
         return out
@@ -401,14 +401,14 @@ class FootballTheme(Theme):
         scope, _, diff = pool.partition(":")
         scope_label = SCOPE_LABELS.get(scope, scope)
         diff_label = {
-            "easy": "易（知名球员）",
+            "easy": "易（知名 + 豪门全员）",
             "normal": "中（联赛全部）",
             "hard": "难（全部，含扩容）",
         }.get(diff, diff)
         if scope == "all" and diff == "hard":
             return "全部（含非五大联赛与退役）"
         if scope == "all" and diff == "easy":
-            return "知名 200 人（含退役与小联赛巨星）"
+            return "知名球员 + 豪门全员"
         if scope == "all" and diff == "normal":
             return "五大联赛 · 中（全部球员）"
         return f"{scope_label} · {diff_label}"
@@ -612,6 +612,14 @@ def _famous_pool(players: list[dict], limit: int = 200) -> list[dict]:
         )
         picked.extend(rest[: limit - len(picked)])
     return picked[:limit]
+
+
+def _easy_pool(players: list[dict]) -> list[dict]:
+    """「易」档：知名 200 人 + 31 支豪门全员（曼城、皇马… 一个不落）。"""
+    picked = _famous_pool(players)
+    chosen = {p.get("cnName") for p in picked}
+    picked.extend(p for p in players if p.get("club") in BIG_CLUBS and p.get("cnName") not in chosen)
+    return picked
 
 
 def _as_list(value: Any) -> list[str]:
