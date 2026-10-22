@@ -80,15 +80,61 @@ def num_cell(label: str, guess_val: Any, target_val: Any, tolerance: int, suffix
     return Cell(label, f"{guess_val}{suffix}{arrow}", level)
 
 
+def _disp_width(text: str) -> int:
+    """估算一段文字在聊天窗里的显示宽度：全角字符与 emoji 算 2，其它算 1。"""
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
+
+
+def _pad_cell(text: str, width: int) -> str:
+    """把一格补齐到指定显示宽度，让两列的第二个格子纵向对齐。
+
+    先补掉半角余数，再用全角空格填满，第二列才会落在同一条竖线上。
+    """
+    current = _disp_width(text)
+    if current % 2:
+        text += " "
+        current += 1
+    gap = width - current
+    if gap < 2:
+        return text + "　"
+    return text + "　" * (gap // 2)
+
+
+BOARD_COLUMNS = 2
+BOARD_COL_MIN = 14
+BOARD_COL_MAX = 26
+BOARD_LINE_BUDGET = 40  # 一行最多占多少半角单位，超了就把第二格挪到下一行，避免聊天窗自动折行
+
+
 def render_board(theme: "Theme", index: int, total: int, guess: dict, target: dict) -> str:
-    """把一次猜测渲染成群聊可读的棋盘。"""
+    """把一次猜测渲染成群聊可读的棋盘：两列、左列补齐成网格，过长则自动单列。"""
     cells = theme.judge(guess, target)
     hit = all(c.level == "correct" for c in cells)
-    lines = []
-    for row in theme.rows:
-        parts = [f"{LEVEL_EMOJI[cells[i].level]}{cells[i].label} {cells[i].value}" for i in row if i < len(cells)]
-        if parts:
-            lines.append("　".join(parts))
+    blocks = [f"{LEVEL_EMOJI[c.level]}{c.label} {c.value}" for c in cells]
+
+    # 列宽固定到题库，连开几局叠在一起也是同一套网格；没配就按本盘最宽的那格对齐
+    column = theme.board_column or min(max(_disp_width(b) for b in blocks) + 1 if blocks else BOARD_COL_MIN, BOARD_COL_MAX)
+    column = max(BOARD_COL_MIN, column)
+    column += column % 2  # 偶数宽，第二列才不会有一格宽的错位
+
+    lines: list[str] = []
+    cols = max(1, theme.columns)
+    for start in range(0, len(blocks), cols):
+        chunk = blocks[start : start + cols]
+        if len(chunk) < cols:
+            lines.extend(chunk)  # 末尾不满一行就各自成行，不硬凑
+            continue
+        too_wide = _disp_width(chunk[0]) > column - 2
+        rough = sum(_disp_width(b) for b in chunk) + 2 * (len(chunk) - 1)
+        if too_wide or rough > BOARD_LINE_BUDGET:
+            # 左列塞不下、或整行太宽：一格一行，宁可多一行也保住网格与不折行
+            lines.extend(chunk)
+            continue
+        line = _pad_cell(chunk[0], column) + "　".join(chunk[1:])
+        if _disp_width(line) > BOARD_LINE_BUDGET:
+            lines.extend(chunk)  # 补齐后超宽：拆成一格一行，宁可多一行也不让第二列歪掉
+        else:
+            lines.append(line)
     head = "🎯 命中" if hit else f"第 {index}/{total} 猜"
     return f"{head}｜{theme.title_of(guess)}\n" + "\n".join(lines)
 
@@ -108,7 +154,8 @@ class Theme:
     icon: str = "🎮"
     db_file: str = ""
     attempts: int = 8
-    rows: tuple[tuple[int, ...], ...] = ()
+    columns: int = BOARD_COLUMNS
+    board_column: int = 0  # 棋盘左列宽（半角单位），按题库固定后每盘网格一致
     pool_alias: dict[str, str] = {}
     default_pool: str = "normal"
     difficulty_hint: str = "普通"
@@ -171,7 +218,7 @@ class CSTheme(Theme):
     icon = "🔫"
     db_file = "players.json"
     attempts = 8
-    rows = ((0, 1, 2), (3, 4), (5, 6, 7))
+    board_column = 22
     pool_alias = {
         "易": "easy", "入门": "easy", "新手": "easy", "easy": "easy", "beginner": "easy",
         "中": "normal", "简单": "normal", "进阶": "normal", "normal": "normal",
@@ -366,7 +413,7 @@ class FootballTheme(Theme):
     icon = "⚽"
     db_file = "football_players.json"
     attempts = 10
-    rows = ((0, 1), (2, 3), (4, 5), (6, 7), (8,))
+    board_column = 22
     pool_alias = {**DIFF_WORDS, "核心": "normal", "全部": "hard", "全量": "hard", "full": "hard"}
     difficulty_hint = "易（默认，知名 200 人）/ 中（五大联赛）/ 难（全部），或指定联赛：英超 / 西甲 / 德甲 / 意甲 / 法甲 / 五大"
 
@@ -507,7 +554,7 @@ class LolTheme(Theme):
     icon = "🖱"
     db_file = "lol_players.json"
     attempts = 8
-    rows = ((0, 1), (2, 3), (4,))
+    board_column = 18
     pool_alias = {
         "易": "easy", "简单": "easy", "easy": "easy",
         "中": "normal", "普通": "normal", "标准": "normal", "normal": "normal",
@@ -727,7 +774,7 @@ class ValorantTheme(Theme):
     icon = "🎯"
     db_file = "valorant_players.json"
     attempts = 8
-    rows = ((0, 1, 2), (3, 4, 5), (6, 7), (8, 9))
+    board_column = 22
     default_pool = "easy"
     pool_alias = {
         "易": "easy", "简单": "easy", "热门": "easy", "easy": "easy",
