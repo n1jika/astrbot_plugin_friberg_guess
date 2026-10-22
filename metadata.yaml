@@ -10,7 +10,7 @@ desc: >-
   Major 冠军/出场/状态，足球比国籍/联赛/俱乐部/位置/出生年/号码/欧冠/世界杯，
   LoL 比位置/国家/大洲/年龄/状态，瓦罗兰特比国籍/赛区/战队/身份/职责/年龄/
   大师赛/冠军赛战绩。次数用尽或超时公布答案。
-version: 1.7.1
+version: 1.7.2
 author: weadee
 repo: https://github.com/weadee/astrbot_plugin_friberg_guess
 astrbot_version: ">=4.9.2"

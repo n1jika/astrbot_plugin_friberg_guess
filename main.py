@@ -33,7 +33,7 @@ DATA_DIR = PLUGIN_DIR / "data"
 
 GREEN, YELLOW, RED = "🟩", "🟨", "🟥"
 LEVEL_EMOJI = {"correct": GREEN, "close": YELLOW, "wrong": RED}
-LEGEND = "🟩 完全一致　🟨 接近　🟥 不符　↑/↓ 答案更大/更小"
+LEGEND = "🟩 完全一致　🟨 接近　🟥 不符\n↑/↓ 表示答案更大 / 更小"
 
 _LEET_TABLE = str.maketrans(
     {"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b", "9": "g"}
@@ -80,63 +80,59 @@ def num_cell(label: str, guess_val: Any, target_val: Any, tolerance: int, suffix
     return Cell(label, f"{guess_val}{suffix}{arrow}", level)
 
 
+BOARD_LINE_BUDGET = 32  # 一行最多占多少半角单位；手机放大字号后约 16 个汉字宽，超了就会折行
+
+
 def _disp_width(text: str) -> int:
     """估算一段文字在聊天窗里的显示宽度：全角字符与 emoji 算 2，其它算 1。"""
     return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
 
 
-def _pad_cell(text: str, width: int) -> str:
-    """把一格补齐到指定显示宽度，让两列的第二个格子纵向对齐。
-
-    先补掉半角余数，再用全角空格填满，第二列才会落在同一条竖线上。
-    """
-    current = _disp_width(text)
-    if current % 2:
-        text += " "
-        current += 1
-    gap = width - current
-    if gap < 2:
-        return text + "　"
-    return text + "　" * (gap // 2)
+def _wrap_join(parts: list[str], budget: int = BOARD_LINE_BUDGET, sep: str = " · ") -> list[str]:
+    """把若干片段用分隔符连起来，超过行宽就换行，避免在窄屏上被硬折断。"""
+    lines: list[str] = []
+    current = ""
+    for part in (p for p in parts if p):
+        candidate = f"{current}{sep}{part}" if current else part
+        if current and _disp_width(candidate) > budget:
+            lines.append(current)
+            current = part
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
 
 
 BOARD_COLUMNS = 2
-BOARD_COL_MIN = 14
-BOARD_COL_MAX = 26
-BOARD_LINE_BUDGET = 40  # 一行最多占多少半角单位，超了就把第二格挪到下一行，避免聊天窗自动折行
 
 
 def render_board(theme: "Theme", index: int, total: int, guess: dict, target: dict) -> str:
-    """把一次猜测渲染成群聊可读的棋盘：两列、左列补齐成网格，过长则自动单列。"""
+    """把一次猜测渲染成群聊可读的棋盘：一行两项，该项太长就单独占一行，绝不折行。"""
     cells = theme.judge(guess, target)
     hit = all(c.level == "correct" for c in cells)
     blocks = [f"{LEVEL_EMOJI[c.level]}{c.label} {c.value}" for c in cells]
 
-    # 列宽固定到题库，连开几局叠在一起也是同一套网格；没配就按本盘最宽的那格对齐
-    column = theme.board_column or min(max(_disp_width(b) for b in blocks) + 1 if blocks else BOARD_COL_MIN, BOARD_COL_MAX)
-    column = max(BOARD_COL_MIN, column)
-    column += column % 2  # 偶数宽，第二列才不会有一格宽的错位
-
     lines: list[str] = []
-    cols = max(1, theme.columns)
-    for start in range(0, len(blocks), cols):
-        chunk = blocks[start : start + cols]
-        if len(chunk) < cols:
-            lines.extend(chunk)  # 末尾不满一行就各自成行，不硬凑
+    current = ""
+    count = 0
+    for block in blocks:
+        if not current:
+            current, count = block, 1
             continue
-        too_wide = _disp_width(chunk[0]) > column - 2
-        rough = sum(_disp_width(b) for b in chunk) + 2 * (len(chunk) - 1)
-        if too_wide or rough > BOARD_LINE_BUDGET:
-            # 左列塞不下、或整行太宽：一格一行，宁可多一行也保住网格与不折行
-            lines.extend(chunk)
-            continue
-        line = _pad_cell(chunk[0], column) + "　".join(chunk[1:])
-        if _disp_width(line) > BOARD_LINE_BUDGET:
-            lines.extend(chunk)  # 补齐后超宽：拆成一格一行，宁可多一行也不让第二列歪掉
+        candidate = f"{current}　{block}"
+        if count < BOARD_COLUMNS and _disp_width(candidate) <= BOARD_LINE_BUDGET:
+            current, count = candidate, count + 1
         else:
-            lines.append(line)
+            lines.append(current)
+            current, count = block, 1
+    if current:
+        lines.append(current)
+
     head = "🎯 命中" if hit else f"第 {index}/{total} 猜"
-    return f"{head}｜{theme.title_of(guess)}\n" + "\n".join(lines)
+    # 标题只要主体名：全名（Erling Haaland 这类）会把标题撑到折行
+    short = re.split(r"[（(]", theme.title_of(guess))[0].strip() or theme.title_of(guess)
+    return f"{head}｜{short}\n" + "\n".join(lines)
 
 
 # ============================================================
@@ -154,8 +150,6 @@ class Theme:
     icon: str = "🎮"
     db_file: str = ""
     attempts: int = 8
-    columns: int = BOARD_COLUMNS
-    board_column: int = 0  # 棋盘左列宽（半角单位），按题库固定后每盘网格一致
     pool_alias: dict[str, str] = {}
     default_pool: str = "normal"
     difficulty_hint: str = "普通"
@@ -218,7 +212,6 @@ class CSTheme(Theme):
     icon = "🔫"
     db_file = "players.json"
     attempts = 8
-    board_column = 22
     pool_alias = {
         "易": "easy", "入门": "easy", "新手": "easy", "easy": "easy", "beginner": "easy",
         "中": "normal", "简单": "normal", "进阶": "normal", "normal": "normal",
@@ -255,8 +248,8 @@ class CSTheme(Theme):
     def pool_label(self, pool: str) -> str:
         return {
             "easy": "易（最火 200 人）",
-            "normal": "中（主流选手）",
-            "hard": "难（全部选手）",
+            "normal": "中（主流）",
+            "hard": "难（全量）",
         }.get(pool, pool)
 
     def judge(self, guess: dict, target: dict) -> list[Cell]:
@@ -298,12 +291,22 @@ class CSTheme(Theme):
 
     def card(self, player: dict) -> str:
         status = "现役" if player.get("is_active") else "已退役"
-        return (
-            f"📇 {player['nickname']}（{status}）\n"
-            f"{player.get('nationality', '—')} · {player.get('region', '—')} · {player.get('team', '—')} · "
-            f"{player.get('role', '—')} · {player.get('age', '—')} 岁\n"
-            f"🏆 Major 冠军 {player.get('major_championships', 0)} 次 · 出场 {player.get('major_appearances', 0)} 次"
+        facts = _wrap_join(
+            [
+                player.get("nationality", "—"),
+                player.get("region", "—"),
+                player.get("team", "—"),
+                player.get("role", "—"),
+                f"{player.get('age', '—')} 岁",
+            ]
         )
+        honors = _wrap_join(
+            [
+                f"Major 冠军 {player.get('major_championships', 0)}",
+                f"出场 {player.get('major_appearances', 0)}",
+            ]
+        )
+        return "\n".join([f"📇 {player['nickname']}（{status}）", *facts, *(f"🏆 {h}" for h in honors)])
 
     def hints(self, player: dict) -> list[tuple[str, str]]:
         return [
@@ -413,7 +416,6 @@ class FootballTheme(Theme):
     icon = "⚽"
     db_file = "football_players.json"
     attempts = 10
-    board_column = 22
     pool_alias = {**DIFF_WORDS, "核心": "normal", "全部": "hard", "全量": "hard", "full": "hard"}
     difficulty_hint = "易（默认，知名 200 人）/ 中（五大联赛）/ 难（全部），或指定联赛：英超 / 西甲 / 德甲 / 意甲 / 法甲 / 五大"
 
@@ -470,20 +472,14 @@ class FootballTheme(Theme):
         return out
 
     def pool_label(self, pool: str) -> str:
-        scope, _, diff = pool.partition(":")
+        scope, sep, diff = pool.partition(":")
+        if not sep:  # 只给了难度词（如 normal），按全库处理
+            scope, diff = "all", pool
         scope_label = SCOPE_LABELS.get(scope, scope)
-        diff_label = {
-            "easy": "易（知名 + 豪门球员）",
-            "normal": "中（联赛全部）",
-            "hard": "难（全部，含扩容）",
-        }.get(diff, diff)
-        if scope == "all" and diff == "hard":
-            return "全部（含非五大联赛与退役）"
-        if scope == "all" and diff == "easy":
-            return "知名 300 人"
-        if scope == "all" and diff == "normal":
-            return "五大联赛 · 中（全部球员）"
-        return f"{scope_label} · {diff_label}"
+        word = {"easy": "易", "normal": "中", "hard": "难"}.get(diff, diff)
+        if scope == "all":
+            return {"easy": "易（知名 300 人）", "normal": "中（五大联赛）", "hard": "难（全量）"}.get(diff, word)
+        return f"{scope_label} · {word}"
 
     def judge(self, guess: dict, target: dict) -> list[Cell]:
         cells: list[Cell] = []
@@ -525,11 +521,25 @@ class FootballTheme(Theme):
         return cells
 
     def card(self, player: dict) -> str:
-        return (
-            f"📇 {player.get('cnName', player['name'])}（{player['name']}）\n"
-            f"{player.get('nationality', '—')} · {player.get('league', '—')} · {_eff_club(player)} · "
-            f"{player.get('position', '—')} · {player.get('birthYear', '—')} 年生 · {player.get('number', '—')} 号\n"
-            f"🏆 欧冠 {player.get('ucl', 0)} 次 · 世界杯出场 {player.get('wc', 0)} 届 · 夺冠 {player.get('wcTitle', 0)} 次"
+        facts = _wrap_join(
+            [
+                player.get("nationality", "—"),
+                player.get("league", "—"),
+                _eff_club(player),
+                player.get("position", "—"),
+                f"{player.get('birthYear', '—')} 年生",
+                f"{player.get('number', '—')} 号",
+            ]
+        )
+        honors = _wrap_join(
+            [
+                f"欧冠 {player.get('ucl', 0)}",
+                f"世界杯 {player.get('wc', 0)}",
+                f"夺冠 {player.get('wcTitle', 0)}",
+            ]
+        )
+        return "\n".join(
+            [f"📇 {player.get('cnName', player['name'])}（{player['name']}）", *facts, *(f"🏆 {h}" for h in honors)]
         )
 
     def hints(self, player: dict) -> list[tuple[str, str]]:
@@ -554,7 +564,6 @@ class LolTheme(Theme):
     icon = "🖱"
     db_file = "lol_players.json"
     attempts = 8
-    board_column = 18
     pool_alias = {
         "易": "easy", "简单": "easy", "easy": "easy",
         "中": "normal", "普通": "normal", "标准": "normal", "normal": "normal",
@@ -597,9 +606,9 @@ class LolTheme(Theme):
 
     def pool_label(self, pool: str) -> str:
         return {
-            "easy": "易（中韩选手）",
-            "normal": "中（现役选手）",
-            "hard": "难（全部，含退役）",
+            "easy": "易（中韩）",
+            "normal": "中（现役）",
+            "hard": "难（全量）",
         }.get(pool, pool)
 
     def judge(self, guess: dict, target: dict) -> list[Cell]:
@@ -643,12 +652,13 @@ class LolTheme(Theme):
         if player.get("_continent"):
             where += f"（{player['_continent']}）"
         parts = [
+            player.get("realName") or "",
             player.get("_team") or "",
             where,
             "/".join(player.get("_positions") or ["—"]),
             f"{player.get('age', '—')} 岁",
         ]
-        return f"📇 {player['gameId']}（{player.get('realName') or '—'}，{status}）\n" + " · ".join(p for p in parts if p)
+        return "\n".join([f"📇 {player['gameId']}（{status}）", *_wrap_join(parts)])
 
     def hints(self, player: dict) -> list[tuple[str, str]]:
         return [
@@ -774,7 +784,6 @@ class ValorantTheme(Theme):
     icon = "🎯"
     db_file = "valorant_players.json"
     attempts = 8
-    board_column = 22
     default_pool = "easy"
     pool_alias = {
         "易": "easy", "简单": "easy", "热门": "easy", "easy": "easy",
@@ -820,9 +829,9 @@ class ValorantTheme(Theme):
 
     def pool_label(self, pool: str) -> str:
         return {
-            "easy": "易（热门 150 人，含退役与自由人）",
-            "normal": "中（有国际赛履历）",
-            "hard": "难（全部选手，含退役）",
+            "easy": "易（热门 150 人）",
+            "normal": "中（国际赛）",
+            "hard": "难（全量）",
         }.get(pool, pool)
 
     @staticmethod
@@ -894,8 +903,10 @@ class ValorantTheme(Theme):
     def card(self, player: dict) -> str:
         title = player["gameId"]
         extra = player.get("cnName") or player.get("realName") or ""
-        head = f"📇 {title}（{extra}，{_valorant_status(player)}）" if extra else f"📇 {title}（{_valorant_status(player)}）"
+        head = f"📇 {title}（{_valorant_status(player)}）"
+        # 真名/中文名单独占一项，名字长也不会把标题撑到折行
         facts = [
+            extra,
             player.get("_team") or "",
             player.get("region") or "",
             "/".join(player.get("_roles") or ["—"]),
@@ -906,10 +917,12 @@ class ValorantTheme(Theme):
             honors.append(f"大师赛冠军 {player['mastersTitle']}")
         if player.get("championsTitle"):
             honors.append(f"冠军赛冠军 {player['championsTitle']}")
-        body = " · ".join(x for x in facts if x)
-        if honors:
-            body += "\n" + " · ".join(honors)
-        return f"{head}\n{body}"
+        body = _wrap_join([x for x in facts if x])
+        honor_lines = _wrap_join(honors)
+        if honor_lines:
+            body.append("🏆 " + honor_lines[0])
+            body.extend(honor_lines[1:])
+        return "\n".join([head, *body])
 
     def hints(self, player: dict) -> list[tuple[str, str]]:
         return [
@@ -1312,15 +1325,14 @@ class GuessProPlugin(Star):
         theme = THEMES[theme_key]
         stat = self.stats["users"].get(SessionKey.stat(group_id, user_id, theme_key))
         if not stat or not stat.get("plays"):
-            return f"还没有{theme.label}战绩，发送「{theme.command}」开一局。"
+            return f"还没有战绩，发「{theme.command}」开局。"
         plays = int(stat["plays"])
         wins = int(stat["wins"])
         avg = int(stat["guesses"]) / plays if plays else 0
         best = stat.get("best") or 0
-        return (
-            f"📊 {stat.get('name', '你')} · {theme.label}：{wins} 胜 / {plays} 局（胜率 {wins / plays:.0%}）\n"
-            f"平均每次消耗 {avg:.1f} 猜" + (f"，最少 {best} 猜命中" if best else "")
-        )
+        head = _wrap_join([f"📊 {stat.get('name', '你')}", f"{wins} 胜 / {plays} 局", f"胜率 {wins / plays:.0%}"])
+        tail = f"平均 {avg:.1f} 猜" + (f" · 最少 {best} 猜命中" if best else "")
+        return "\n".join([*head, tail])
 
     def _rank_board(self, group_id: str, theme_key: str) -> str:
         theme = THEMES[theme_key]
@@ -1333,15 +1345,13 @@ class GuessProPlugin(Star):
             if key.startswith(prefix) and key.endswith(suffix) and int(value.get("wins", 0)) > 0
         ]
         if not rows:
-            return f"本群还没有人猜中过{theme.label}，来开个记录？发送「{theme.command}」。"
+            return f"还没有人猜中，发「{theme.command}」开局。"
         rows.sort(key=lambda item: (-int(item[0].get("wins", 0)), int(item[0].get("guesses", 0))))
         lines = [f"🏆 本群战绩榜 · {theme.label}"]
         for i, (stat, _key) in enumerate(rows[:10], start=1):
             plays = int(stat.get("plays", 0)) or 1
             avg = int(stat.get("guesses", 0)) / plays
-            lines.append(
-                f"{i}. {stat.get('name', '匿名')}　{int(stat.get('wins', 0))} 胜 / {plays} 局　平均 {avg:.1f} 猜"
-            )
+            lines.append(f"{i}. {stat.get('name', '匿名')}　{int(stat.get('wins', 0))} 胜 · 平均 {avg:.1f} 猜")
         return "\n".join(lines)
 
     # ---------------- 开局 ----------------
@@ -1421,23 +1431,28 @@ class GuessProPlugin(Star):
 
     def _start_text(self, theme: Theme, db: PlayerDB, game: Game) -> str:
         minutes = int(self._cfg("timeout_minutes", 30) or 0)
-        limit = f"｜限时 {minutes} 分钟" if minutes > 0 else ""
-        others = " · ".join(
+        limit = f" · 限时 {minutes} 分钟" if minutes > 0 else ""
+        others = " ".join(
             f"{t.command}"
             for k, t in THEMES.items()
             if k != theme.key and self._enabled(k) and self.dbs[k].players
         )
-        tail = f"\n其它题库：{others}" if others else ""
         label = theme.pool_label(game.pool)
         size = db.pool_size(game.pool)
-        # 标签里已经带了人数就不再重复（如「易（最火 200 人）」）
-        counter = "" if re.search(r"\d+\s*人", label) else f"（{size} 人）"
+        # 标签里已经带了人数就不再重复（如「易（最火 200 人）」），没带就补进括号里
+        if re.search(r"\d+\s*人", label):
+            shown = label
+        elif label.endswith("）"):
+            shown = f"{label[:-1]} {size} 人）"
+        else:
+            shown = f"{label}（{size} 人）"
+        tail = f"\n其它题库 {others}" if others else ""
         return (
             f"{theme.icon} {theme.command} · 猜{theme.label}\n"
-            f"难度：{label}{counter}"
-            f"｜机会：{game.attempts} 次{limit}\n"
-            f"直接发选手名就能猜（大小写不限，可以只写前几个字母）\n"
-            f"其它指令：提示 · 放弃 · 战绩 · 排行 · 图鉴 <名字>{tail}\n"
+            f"难度：{shown}\n"
+            f"机会：{game.attempts} 次{limit}\n"
+            f"直接发选手名就能猜，大小写不限\n"
+            f"指令 提示 放弃 战绩 排行 图鉴{tail}\n"
             f"{LEGEND}"
         )
 
@@ -1521,7 +1536,7 @@ class GuessProPlugin(Star):
         label, value = random.choice(pool)
         game.revealed.append(label)
         self._save_state()
-        return f"💡 线索：{value}（提示还剩 {limit - len(game.revealed)} 次）"
+        return f"💡 线索：{value}（提示剩 {limit - len(game.revealed)} 次）"
 
     def _giveup_text(self, event: AstrMessageEvent) -> str:
         theme_key = self._current_theme(event)

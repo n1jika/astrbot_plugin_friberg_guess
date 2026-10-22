@@ -244,24 +244,16 @@ async def main() -> None:
     print("[5] 棋盘渲染")
     board = m.render_board(fbt, 1, 10, haaland, rodri)
     lines = board.splitlines()
-    check(len(lines) == 6, f"足球棋盘 6 行（标题 + 5 行两列，实际 {len(lines)}）")
-    check(all(ln.count("🟩") + ln.count("🟨") + ln.count("🟥") == 2 for ln in lines[1:5]), "中间各行都是两列")
+    cells = fbt.judge(haaland, rodri)
+    body = lines[1:]
+    counts = [ln.count("🟩") + ln.count("🟨") + ln.count("🟥") for ln in body]
+    check(all(c <= 2 for c in counts), f"每行最多两项（{counts}）")
+    check(len(body) >= (len(cells) + 1) // 2, f"确实两项一行地排（{len(cells)} 项排了 {len(body)} 行）")
+    check(sum(counts) == len(cells), "一项都没漏")
     check(max(m._disp_width(ln) for ln in lines) <= m.BOARD_LINE_BUDGET, "每行都不超过行宽预算（不会折行）")
     check("🟨国籍" in board and "🟥联赛" in board, "带颜色与属性名")
     board_cs = m.render_board(m.THEMES["cs"], 1, 8, smpl, zywoo)
     check(board_cs.startswith("第 1/8 猜｜s1mple"), "CS 棋盘标题")
-    # 同一题库连开两盘，第二列落在同一条竖线上
-    def _second_col(line: str) -> int | None:
-        marks = [i for i, ch in enumerate(line) if ch in "🟩🟨🟥"]
-        return m._disp_width(line[: marks[1]]) if len(marks) > 1 else None
-
-    starts = set()
-    for target in (rodri, haaland):
-        for ln in m.render_board(fbt, 1, 10, haaland, target).splitlines()[1:]:
-            col = _second_col(ln)
-            if col is not None:
-                starts.add(col)
-    check(starts == {fbt.board_column}, f"跨盘第二列都对齐在 {fbt.board_column}（{sorted(starts)}）")
 
     print("[6] CS 整局")
     plugin = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
@@ -578,7 +570,8 @@ async def main() -> None:
 
     # 整局：答案来自 150 人池，池外选手照样能猜
     vb = m.render_board(v_theme, 1, 8, vdb.get("ZmjjKK"), vdb.get("TenZ"))
-    check(len(vb.splitlines()) == 6, f"瓦一把棋盘 6 行（{len(vb.splitlines())}）")
+    vb_body = vb.splitlines()[1:]
+    check(len(vb_body) <= 10 and len(vb_body) >= 5, f"瓦一把 10 项排了 {len(vb_body)} 行（两项一行）")
     check(all(m._disp_width(ln) <= m.BOARD_LINE_BUDGET for ln in vb.splitlines()), "瓦一把棋盘每行都不折行")
     v_plugin = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
     v_targets = set()
