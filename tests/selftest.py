@@ -358,16 +358,17 @@ async def main() -> None:
     out = await run_commands(strict.start_football, FakeEvent(group="40000", user="9"), "")
     check(not out, "仅私聊：群里的指令处理器也不响应")
 
-    print("[12] 足一把范围与热门球队")
+    print("[12] 足一把范围与难度")
     fb_plugin = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
     cases = [
-        ("足一把", "top5:normal", 700, 1200),
-        ("足一把 易", "top5:easy", 400, 600),
+        ("足一把", "all:easy", 195, 205),
+        ("足一把 易", "all:easy", 195, 205),
+        ("足一把 中", "top5:normal", 900, 950),
         ("足一把 难", "all:hard", 1100, 1200),
-        ("足一把 英超", "epl:normal", 300, 340),
+        ("足一把 英超", "epl:easy", 150, 180),
         ("足一把 英超 易", "epl:easy", 150, 180),
         ("足一把 五大 难", "top5:hard", 900, 950),
-        ("足一把 法甲", "ligue1:normal", 20, 40),
+        ("足一把 法甲", "ligue1:easy", 20, 40),
     ]
     for i, (text, expect_pool, lo, hi) in enumerate(cases):
         ev_ = FakeEvent(text=text, group="50000", user=f"fb{i}", name="足球")
@@ -378,7 +379,15 @@ async def main() -> None:
         size_ = fb_plugin.dbs["football"].pool_size(expect_pool)
         check(lo <= size_ <= hi, f"{text} 池人数 {size_} 在合理区间")
         reply_ = _flatten(ev_.results[0]) if ev_.results else ""
-        check("难度：" in reply_ and "人）" in reply_, f"{text} 开局写明范围与人数")
+        check("难度：" in reply_ and "人）" in reply_ and "（" in reply_, f"{text} 开局写明范围与人数")
+
+    fam = fb_plugin.dbs["football"].pool("all:easy")
+    check(len(fam) == 200, f"默认池正好 200 人（{len(fam)}）")
+    check(any(p["league"] == "已退役" for p in fam), "默认池包含退役巨星")
+    check(any(p["league"] in {"沙特联", "美职联", "土超", "巴甲"} for p in fam), "默认池包含小联赛巨星")
+    names = {p["cnName"] for p in fam}
+    for star in ("梅西", "C罗", "姆巴佩", "哈兰德", "齐达内", "大罗", "马尔蒂尼"):
+        check(star in names, f"默认池包含 {star}")
 
     ev_bad_fb = FakeEvent(text="足一把 德乙", group="50000", user="fbx")
     await fb_plugin.on_message(ev_bad_fb)

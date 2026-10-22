@@ -287,6 +287,29 @@ LEAGUE_SCOPES = {
     "英超": "epl", "西甲": "laliga", "德甲": "bundesliga", "意甲": "seriea", "法甲": "ligue1",
     "五大": "top5", "五大联赛": "top5",
 }
+FAMOUS = {
+    "梅西", "C罗", "姆巴佩", "哈兰德", "内马尔", "贝林厄姆",
+    "维尼修斯", "萨拉赫", "德布劳内", "凯恩", "莱万多夫斯基", "莫德里奇",
+    "克罗斯", "本泽马", "苏亚雷斯", "伊布拉希莫维奇", "贝尔", "阿扎尔",
+    "卡卡", "罗纳尔迪尼奥", "大罗", "齐达内", "贝克汉姆", "亨利",
+    "杰拉德", "兰帕德", "鲁尼", "马尔蒂尼", "托蒂", "布冯",
+    "卡西利亚斯", "哈维", "伊涅斯塔", "皮尔洛", "罗本", "里贝里",
+    "德罗巴", "埃托奥", "阿圭罗", "巴乔", "菲戈", "贝利",
+    "马拉多纳", "克鲁伊夫", "范巴斯滕", "普拉蒂尼", "济科", "罗马里奥",
+    "里瓦尔多", "卡福", "罗伯特·卡洛斯", "内斯塔", "卡纳瓦罗", "拉姆",
+    "克洛泽", "施魏因施泰格", "巴拉克", "欧文", "劳尔", "范尼斯特鲁伊",
+    "博格坎普", "皮克", "布斯克茨", "若尔迪·阿尔巴", "马塞洛", "佩佩",
+    "瓦拉内", "亚马尔", "罗德里", "福登", "萨卡", "厄德高",
+    "拉菲尼亚", "库尔图瓦", "阿利松", "范迪克", "吕迪格", "戴维斯",
+    "基米希", "托马斯·穆勒", "维尔茨", "穆西亚拉", "劳塔罗·马丁内斯", "巴雷拉",
+    "莱奥", "多纳鲁马", "格列兹曼", "奥布拉克", "特尔施特根", "诺伊尔",
+    "迪马利亚", "孙兴慜", "郑智", "孙继海", "中田英寿", "中村俊辅",
+    "朴智星", "本田圭佑", "范志毅", "保利尼奥", "孔卡", "马内",
+    "马赫雷斯", "库利巴利", "米林科维奇-萨维奇", "菲利克斯", "布罗佐维奇", "纳乔",
+    "鲁本·内维斯", "沃特金斯", "托尼", "坎特", "博格巴", "拉什福德",
+    "布鲁诺·费尔南德斯", "麦迪逊", "凯尔·沃克", "戈登", "埃德森", "奥纳纳",
+}
+
 SCOPE_LABELS = {
     "all": "全部联赛", "top5": "五大联赛", "epl": "英超", "laliga": "西甲",
     "bundesliga": "德甲", "seriea": "意甲", "ligue1": "法甲",
@@ -318,7 +341,7 @@ class FootballTheme(Theme):
     attempts = 10
     rows = ((0, 1), (2, 3), (4, 5), (6, 7), (8,))
     pool_alias = {**DIFF_WORDS, "核心": "normal", "全部": "hard", "全量": "hard", "full": "hard"}
-    difficulty_hint = "易 / 中 / 难，或指定联赛：英超 / 西甲 / 德甲 / 意甲 / 法甲 / 五大"
+    difficulty_hint = "易（默认，知名 200 人）/ 中（五大联赛）/ 难（全部），或指定联赛：英超 / 西甲 / 德甲 / 意甲 / 法甲 / 五大"
 
     def resolve_pool(self, raw: str, default: str) -> str | None:
         """支持「联赛 + 难度」组合，如 `英超 易`、`五大 难`。"""
@@ -333,9 +356,9 @@ class FootballTheme(Theme):
                 scope, diff = "all", "hard"
             else:
                 return None
-        # 只说了「难」没限定范围时，就是全库；否则默认限定五大联赛
+        # 「易」（知名 200 人）和「难」都在全库取，「中」默认限定五大联赛
         if not scope:
-            scope = "all" if diff == "hard" else "top5"
+            scope = "all" if diff in ("easy", "hard") else "top5"
         return f"{scope}:{diff}"
 
     def load(self, raw: Any) -> list[dict]:
@@ -352,14 +375,14 @@ class FootballTheme(Theme):
         return f"{cn}（{player['name']}）" if cn and cn != player["name"] else player["name"]
 
     def pools(self, players: list[dict]) -> dict[str, list[dict]]:
-        hot = [p for p in players if p.get("club") in BIG_CLUBS]
+        famous = _famous_pool(players)
         top5 = [p for p in players if p.get("league") in TOP5_LEAGUES]
         out = {
-            # 全库：易=豪门，中=五大联赛，难=全部（含沙特/美职/英冠/退役）
-            "all:easy": hot or players,
+            # 全库：易=最出名的 200 人（含退役巨星与小联赛巨星），中=五大联赛，难=全部
+            "all:easy": famous,
             "all:normal": top5 or players,
             "all:hard": players,
-            "top5:easy": hot or top5,
+            "top5:easy": [p for p in famous if p.get("league") in TOP5_LEAGUES] or top5,
             "top5:normal": top5,
             "top5:hard": top5,
         }
@@ -367,8 +390,9 @@ class FootballTheme(Theme):
             if key == "top5":
                 continue
             pool = [p for p in players if p.get("league") == league]
+            famous_league = [p for p in famous if p.get("league") == league]
             hot_league = [p for p in pool if p.get("club") in BIG_CLUBS]
-            out[f"{key}:easy"] = hot_league or pool
+            out[f"{key}:easy"] = famous_league if len(famous_league) >= 40 else (hot_league or pool)
             out[f"{key}:normal"] = pool
             out[f"{key}:hard"] = pool
         return out
@@ -376,9 +400,17 @@ class FootballTheme(Theme):
     def pool_label(self, pool: str) -> str:
         scope, _, diff = pool.partition(":")
         scope_label = SCOPE_LABELS.get(scope, scope)
-        diff_label = {"easy": "易（热门球队）", "normal": "中（全部球员）", "hard": "难（全部，含扩容）"}.get(diff, diff)
+        diff_label = {
+            "easy": "易（知名球员）",
+            "normal": "中（联赛全部）",
+            "hard": "难（全部，含扩容）",
+        }.get(diff, diff)
         if scope == "all" and diff == "hard":
             return "全部（含非五大联赛与退役）"
+        if scope == "all" and diff == "easy":
+            return "知名 200 人（含退役与小联赛巨星）"
+        if scope == "all" and diff == "normal":
+            return "五大联赛 · 中（全部球员）"
         return f"{scope_label} · {diff_label}"
 
     def judge(self, guess: dict, target: dict) -> list[Cell]:
@@ -554,6 +586,32 @@ class LolTheme(Theme):
             ("年龄", f"{player.get('age', '—')} 岁"),
             ("状态", "现役" if str(player.get("status", "")).lower().startswith("act") else "退役"),
         ]
+
+
+def _fame_score(player: dict) -> tuple:
+    """给「谁更容易被猜到」打分：传奇履历 + 豪门 + 退役身份。"""
+    return (
+        1 if (player.get("ucl") or 0) > 0 else 0,
+        1 if (player.get("wcTitle") or 0) > 0 else 0,
+        int(player.get("wc") or 0),
+        1 if player.get("club") in BIG_CLUBS else 0,
+        int(player.get("ucl") or 0),
+        1 if player.get("league") == "已退役" else 0,
+    )
+
+
+def _famous_pool(players: list[dict], limit: int = 200) -> list[dict]:
+    """最出名的 200 人：先取名单内的，不够再按履历补齐。"""
+    picked = [p for p in players if p.get("cnName") in FAMOUS]
+    if len(picked) < limit:
+        chosen = {p["cnName"] for p in picked}
+        rest = sorted(
+            (p for p in players if p.get("cnName") not in chosen),
+            key=_fame_score,
+            reverse=True,
+        )
+        picked.extend(rest[: limit - len(picked)])
+    return picked[:limit]
 
 
 def _as_list(value: Any) -> list[str]:
@@ -980,7 +1038,7 @@ class GuessProPlugin(Star):
         if gkey in self.games:
             return f"这局{theme.label}还没结束呢，先猜，或者发「放弃」结束。"
 
-        default_pool = str(self._cfg("difficulty", "") or self._cfg("default_difficulty", "中"))
+        default_pool = str(self._cfg("difficulty", "") or self._cfg("default_difficulty", "易"))
         pool = theme.resolve_pool(raw_difficulty, default_pool)
         if not pool:
             return f"{theme.command}的难度只有：{theme.difficulty_hint}。"
