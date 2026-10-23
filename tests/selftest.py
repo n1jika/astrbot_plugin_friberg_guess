@@ -657,6 +657,117 @@ async def main() -> None:
     # 未知题库文件缺失时不影响其它题库
     check("valorant" in m.THEMES and m.THEMES["valorant"].command == "瓦一把", "主题已注册")
 
+    # ---------------------------------------------------------------- [18] 组队
+    print("[18] 双人 / 多人回合制组队（独猜照旧）")
+    tp = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    GID = "73000"
+    ev_open = FakeEvent(text="弗一把 双人", group=GID, user="a1", name="阿明")
+    await tp.on_message(ev_open)
+    room = tp.games.get(m.SessionKey.team(GID, "cs"))
+    check(room is not None and room.is_team, "发「弗一把 双人」建房")
+    check(room is not None and not room.started, "建完房先不出题")
+    check(room is not None and len(room.members) == 1, f"房主已在队里（{len(room.members) if room else 0}）")
+    check(bool(ev_open.results) and "加入" in _flatten(ev_open.results[0]), "提示别人发「加入」")
+
+    # 没带「双人」的照旧是独猜
+    solo_key = m.SessionKey.game(GID, "b1", "cs")
+    await tp.on_message(FakeEvent(text="弗一把", group=GID, user="b1", name="小红"))
+    check(solo_key in tp.games, "组队房间不影响别人开独猜")
+    solo_game = tp.games[solo_key]
+    check(not solo_game.is_team and solo_game.started, "独猜依然是开局即出题")
+
+    # 第二个人加入，双人房凑齐直接开
+    ev_join = FakeEvent(text="加入", group=GID, user="b1", name="小红")
+    await tp.on_message(ev_join)
+    check(room is not None and room.started, "第二人「加入」后自动开局")
+    check(room is not None and len(room.members) == 2, "队里两人")
+    check(room is not None and room.attempts == m.THEMES["cs"].attempts + 2, "两人局多给 2 次机会")
+    check(room is not None and room.turn == 0, "从房主先猜")
+    check(bool(ev_join.results) and "回合制" in _flatten(ev_join.results[0]), "开局文案写明回合制")
+
+    db_cs = tp.dbs["cs"]
+    safe = [
+        m.THEMES["cs"].title_of(p)
+        for p in db_cs.players
+        if "（" not in m.THEMES["cs"].title_of(p) and "(" not in m.THEMES["cs"].title_of(p)
+    ]
+    wrongs = [s for s in safe if s != room.target][:2]
+
+    # 回合制：没轮到的人不能说
+    ev_wrong_turn = FakeEvent(text=wrongs[0], group=GID, user="b1", name="小红")
+    await tp.on_message(ev_wrong_turn)
+    body = _flatten(ev_wrong_turn.results[0]) if ev_wrong_turn.results else ""
+    check("轮到" in body and "阿明" in body, f"没轮到时不让猜（{body[:20]}）")
+    check(room is not None and not room.guessed, "被拦下的猜测不占次数")
+
+    # 轮到的人猜错 → 换人
+    ev_a = FakeEvent(text=wrongs[0], group=GID, user="a1", name="阿明")
+    await tp.on_message(ev_a)
+    body = _flatten(ev_a.results[0]) if ev_a.results else ""
+    check("第 1/" in body, f"房主能正常猜（{body[:16]}）")
+    check("轮到 小红" in body, "猜完把回合交给下一位")
+    check(room is not None and room.turn == 1, "回合指针推进")
+
+    # 第二位猜错 → 回合转回房主
+    ev_b = FakeEvent(text=wrongs[1], group=GID, user="b1", name="小红")
+    await tp.on_message(ev_b)
+    body = _flatten(ev_b.results[0]) if ev_b.results else ""
+    check("第 2/" in body and "轮到 阿明" in body, "第二人回合正常轮换")
+    check(room is not None and room.turn == 0, "轮完一圈回到房主")
+
+    # 猜中：全队记胜
+    hit_text = tp._apply_guess(room, db_cs.get(room.target), "a1", "阿明")
+    check("猜中" in hit_text, "猜中提示")
+    check(room is not None and room.key not in tp.games, "猜中后房间关闭")
+    a_stat = tp.stats["users"].get(m.SessionKey.stat(GID, "a1", "cs"), {})
+    b_stat = tp.stats["users"].get(m.SessionKey.stat(GID, "b1", "cs"), {})
+    check(int(a_stat.get("wins", 0)) == 1 and int(b_stat.get("wins", 0)) == 1, "全队各记一胜")
+    check(int(a_stat.get("plays", 0)) == 1 and int(b_stat.get("plays", 0)) == 1, "全队各记一局")
+
+    # 存档能带上组队进度
+    revived = m.Game.from_dict({**room.to_dict(), "started": True})
+    check(
+        revived.is_team and revived.turn == room.turn and revived.members == room.members,
+        "组队进度可存档恢复",
+    )
+
+    # 「多人」要房主发「开始」
+    tp2 = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    GID2 = "73100"
+    await tp2.on_message(FakeEvent(text="足一把 多人", group=GID2, user="c1", name="老王"))
+    room2 = tp2.games.get(m.SessionKey.team(GID2, "football"))
+    check(room2 is not None and not room2.started and room2.team_size == 0, "「多人」不指定人数就等人")
+    await tp2.on_message(FakeEvent(text="加入", group=GID2, user="c2", name="小李"))
+    check(room2 is not None and not room2.started, "「多人」凑人不会自动开")
+    out2 = await run_commands(tp2.start_team, FakeEvent(text="开始", group=GID2, user="c1", name="老王"))
+    check(room2 is not None and room2.started, "房主发「开始」才出题")
+    check(bool(out2) and "回合制" in _flatten(out2[0]), "多人开局也写明回合制")
+
+    # 非房主不能开始
+    tp2.games[m.SessionKey.team(GID2, "football")] = m.Game(
+        key=m.SessionKey.team(GID2, "football"), theme="football", umo="u", group_id=GID2,
+        user_id="c1", user_name="老王", target="", pool="all:easy", mode="team",
+        members=[{"id": "c1", "name": "老王"}], started=False,
+    )
+    out3 = await run_commands(tp2.start_team, FakeEvent(text="开始", group=GID2, user="c2", name="小李"))
+    check("房主" in _flatten(out3[0]), "非房主不能开局")
+
+    # 仅开启独猜
+    tp3 = m.GuessProPlugin(_Context(), {"timeout_minutes": 0, "solo_only": True})
+    GID3 = "73200"
+    ev_no = FakeEvent(text="弗一把 双人", group=GID3, user="d1", name="独猜党")
+    await tp3.on_message(ev_no)
+    check(m.SessionKey.team(GID3, "cs") not in tp3.games, "「仅开启独猜」时双人局不建房")
+    check("独猜" in _flatten(ev_no.results[0]), "提示当前只开独猜")
+    await tp3.on_message(FakeEvent(text="弗一把", group=GID3, user="d1", name="独猜党"))
+    check(m.SessionKey.game(GID3, "d1", "cs") in tp3.games, "「仅开启独猜」时独猜正常")
+
+    # 私聊不开团
+    tp4 = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    ev_pm = FakeEvent(text="弗一把 双人", group="", user="e1", name="私聊")
+    await tp4.on_message(ev_pm)
+    check("群里" in _flatten(ev_pm.results[0]), "私聊不让开团")
+
     print("\n全部自测通过 ✅")
     print("足球棋盘示例：\n" + m.render_board(fbt, 1, 10, haaland, rodri))
 

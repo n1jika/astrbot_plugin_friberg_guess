@@ -16,6 +16,12 @@
     "default": false,
     "hint": "开启后，群里发指令和选手名都不会响应，只能私聊玩。"
   },
+  "solo_only": {
+    "description": "仅开启独猜",
+    "type": "bool",
+    "default": false,
+    "hint": "关闭组队：不再响应「弗一把 双人 / 多人」，所有人都只能各猜各的。"
+  },
   "max_attempts": {
     "description": "每局猜测次数上限",
     "type": "int",

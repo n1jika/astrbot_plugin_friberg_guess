@@ -1175,6 +1175,20 @@ class Game:
     guessed: list[str] = field(default_factory=list)
     revealed: list[str] = field(default_factory=list)
     task: asyncio.Task | None = None
+    # 组队局：同一个群共享一个答案。solo 时这些字段都是空的
+    mode: str = "solo"  # solo / team
+    members: list[dict[str, str]] = field(default_factory=list)  # [{"id","name"}]
+    started: bool = True
+    guessed_by: list[str] = field(default_factory=list)  # 每次猜的人名，和 guessed 一一对应
+    team_size: int = 0  # 房间想凑几个人（0 = 不限，凑满 TEAM_MAX）
+    turn: int = 0  # 回合制：轮到第几个队员
+
+    @property
+    def is_team(self) -> bool:
+        return self.mode == "team"
+
+    def has(self, user_id: str) -> bool:
+        return any(m.get("id") == user_id for m in self.members)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1190,6 +1204,12 @@ class Game:
             "created_at": self.created_at,
             "guessed": self.guessed,
             "revealed": self.revealed,
+            "mode": self.mode,
+            "members": self.members,
+            "started": self.started,
+            "guessed_by": self.guessed_by,
+            "team_size": self.team_size,
+            "turn": self.turn,
         }
 
     @classmethod
@@ -1201,12 +1221,18 @@ class Game:
             group_id=data.get("group_id", ""),
             user_id=data.get("user_id", ""),
             user_name=data.get("user_name", ""),
-            target=data["target"],
+            target=data.get("target", ""),
             pool=data.get("pool", "normal"),
             attempts=int(data.get("attempts") or 8),
             created_at=data.get("created_at", time.time()),
             guessed=list(data.get("guessed") or []),
             revealed=list(data.get("revealed") or []),
+            mode=data.get("mode", "solo"),
+            members=list(data.get("members") or []),
+            started=bool(data.get("started", True)),
+            guessed_by=list(data.get("guessed_by") or []),
+            team_size=int(data.get("team_size") or 0),
+            turn=int(data.get("turn") or 0),
         )
 
 
@@ -1225,6 +1251,11 @@ class SessionKey:
     def stat(group_id: str, user_id: str, theme: str) -> str:
         return f"{group_id or 'private'}:{user_id}:{theme}"
 
+    @staticmethod
+    def team(group_id: str, theme: str) -> str:
+        """组队局：同一个群、同一个题库共用一个房间。"""
+        return f"{group_id or 'private'}:team:{theme}"
+
 # ============================================================
 # 文本入口解析
 # ============================================================
@@ -1238,8 +1269,26 @@ _LOOKUP_RE = re.compile(r"^[/／]?(?:图鉴|查选手|查球员|查资料)\s*(\S
 _LEADING_RE = re.compile(r"^[/／]?(?:我猜|猜一下|猜|guess|answer|是)\s*", re.I)
 _TRAILING_RE = re.compile(r"(?:吧|呢|啊|呀|吗|了)+$")
 
+# 组队只在开局词里显式带「双人 / 多人」时触发，其余一律独猜
+_TEAM_WORDS = ("双人", "多人")
+TEAM_MAX = 6  # 一个房间最多几个人
+TEAM_LOBBY_SECONDS = 300  # 房间最多等人等多久
+_MODE_RE = re.compile(rf"^({'|'.join(_TEAM_WORDS)})\s*(\d+)?\s*(.*)$")
+
+
+def _split_mode(raw: str) -> tuple[str, int, str]:
+    """把「双人」「多人 4 难」拆成 (模式, 人数, 剩余难度词)。"""
+    text = (raw or "").strip()
+    head = _MODE_RE.match(text)
+    if not head:
+        return "solo", 0, text
+    word, num, rest = head.group(1), head.group(2), (head.group(3) or "").strip()
+    size = int(num) if num else (2 if word == "双人" else 0)
+    return "team", size, rest
+
+
 # 不带唤醒前缀时也能用的口令 → 插件方法名
-_SILENT_WITHOUT_GAME = {"_hint_text", "_giveup_text"}
+_SILENT_WITHOUT_GAME = {"_hint_text", "_giveup_text", "_join_team", "_start_team"}
 _BARE_COMMANDS = {
     "提示": "_hint_text",
     "线索": "_hint_text",
@@ -1249,6 +1298,9 @@ _BARE_COMMANDS = {
     "战绩": "_stats_text",
     "排行": "_rank_text",
     "排行榜": "_rank_text",
+    "加入": "_join_team",
+    "加我": "_join_team",
+    "开始": "_start_team",
 }
 
 
@@ -1383,19 +1435,27 @@ class GuessProPlugin(Star):
 
     # ---------------- 战绩 ----------------
 
-    def _settle_stats(self, game: Game, won: bool) -> None:
-        key = SessionKey.stat(game.group_id, game.user_id, game.theme)
-        user = self.stats["users"].setdefault(
-            key, {"name": game.user_name, "wins": 0, "plays": 0, "guesses": 0, "best": 0}
+    def _settle_stats(self, game: Game, won: bool, winner_id: str = "") -> None:
+        # 组队局全队各记一局；猜中的那个人额外留个记号
+        members = (
+            [m for m in game.members if m.get("id")]
+            if game.is_team and game.members
+            else [{"id": game.user_id, "name": game.user_name}]
         )
-        user["name"] = game.user_name or user.get("name", "")
-        user["plays"] = int(user.get("plays", 0)) + 1
-        user["guesses"] = int(user.get("guesses", 0)) + len(game.guessed)
-        if won:
-            user["wins"] = int(user.get("wins", 0)) + 1
-            best = len(game.guessed)
-            if not user.get("best") or best < int(user["best"]):
-                user["best"] = best
+        for member in members:
+            key = SessionKey.stat(game.group_id, member["id"], game.theme)
+            user = self.stats["users"].setdefault(
+                key, {"name": member.get("name", ""), "wins": 0, "plays": 0, "guesses": 0, "best": 0}
+            )
+            user["name"] = member.get("name") or user.get("name", "")
+            user["plays"] = int(user.get("plays", 0)) + 1
+            # 组队局记团队用了几次，和个人「最少 N 猜」的口径保持一致
+            user["guesses"] = int(user.get("guesses", 0)) + len(game.guessed)
+            if won:
+                user["wins"] = int(user.get("wins", 0)) + 1
+                best = len(game.guessed)
+                if not user.get("best") or best < int(user["best"]):
+                    user["best"] = best
         group = self.stats["groups"].setdefault(
             f"{game.group_id or 'private'}:{game.theme}", {"plays": 0, "wins": 0}
         )
@@ -1454,16 +1514,27 @@ class GuessProPlugin(Star):
         _ukey, gid, uid = self._pk(event)
         return self.games.get(SessionKey.game(gid, uid, theme_key))
 
+    def _play_game(self, event: AstrMessageEvent, theme_key: str) -> Game | None:
+        """该用户在这个题库的对局：组队局优先（必须是队里的人），否则看自己的独猜。"""
+        team = self._team_of(event, theme_key)
+        if team and team.has(event.get_sender_id()):
+            return team
+        return self._game_of(event, theme_key)
+
     def _current_theme(self, event: AstrMessageEvent) -> str:
         """当前会话正在玩的题库；没有进行中的对局时回落到默认题库。"""
-        ukey, _gid, _uid = self._pk(event)
+        ukey, _gid, uid = self._pk(event)
         theme_key = self.active.get(ukey)
-        if theme_key and self._game_of(event, theme_key):
+        if theme_key and self._play_game(event, theme_key):
             return theme_key
         for key in THEMES:
-            if self._game_of(event, key):
+            if self._play_game(event, key):
                 self.active[ukey] = key
                 return key
+        team = self._team_of(event)
+        if team and team.has(uid):
+            self.active[ukey] = team.theme
+            return team.theme
         return theme_key or "cs"
 
     def _begin(self, event: AstrMessageEvent, theme_key: str, raw_difficulty: str) -> str:
@@ -1479,21 +1550,24 @@ class GuessProPlugin(Star):
                 )
             return f"{theme.label}题库没加载成功，检查 data/{theme.db_file}。"
 
+        mode, size, rest = _split_mode(raw_difficulty)
         ukey, gid, uid = self._pk(event)
-        gkey = SessionKey.game(gid, uid, theme_key)
-        if gkey in self.games:
-            return f"这局{theme.label}还没结束呢，先猜，或者发「放弃」结束。"
-
         default_pool = str(self._cfg("difficulty", "") or self._cfg("default_difficulty", "易"))
-        pool = theme.resolve_pool(raw_difficulty, default_pool)
+        pool = theme.resolve_pool(rest, default_pool)
         if not pool:
             return f"{theme.command}的难度只有：{theme.difficulty_hint}。"
         if not db.pool(pool):
             pool = theme.default_pool
-        candidates = db.answer_pool(pool) or db.pool(pool)
 
+        if mode == "team":
+            return self._open_team(event, theme, pool, size)
+
+        gkey = SessionKey.game(gid, uid, theme_key)
+        if gkey in self.games:
+            return f"这局{theme.label}还没结束呢，先猜，或者发「放弃」结束。"
+
+        candidates = db.answer_pool(pool) or db.pool(pool)
         target = random.choice(candidates)
-        attempts = self._attempts(theme)
         game = Game(
             key=gkey,
             theme=theme_key,
@@ -1503,13 +1577,179 @@ class GuessProPlugin(Star):
             user_name=event.get_sender_name(),
             target=theme.title_of(target),
             pool=pool,
-            attempts=attempts,
+            attempts=self._attempts(theme),
         )
         self.games[gkey] = game
         self.active[ukey] = theme_key
         self._spawn_timer(game)
         self._save_state()
         return self._start_text(theme, db, game)
+
+    # ---------------- 组队局 ----------------
+
+    def _team_of(self, event: AstrMessageEvent, theme_key: str | None = None) -> Game | None:
+        """群里进行中的组队局；theme_key 为空时返回任意一个。"""
+        gid = event.get_group_id()
+        if not gid:
+            return None
+        keys = [theme_key] if theme_key else list(THEMES)
+        for key in keys:
+            game = self.games.get(SessionKey.team(gid, key))
+            if game and game.is_team:
+                return game
+        return None
+
+    def _lobby_of(self, event: AstrMessageEvent, theme_key: str | None = None) -> Game | None:
+        game = self._team_of(event, theme_key)
+        if not game or game.started:
+            return None
+        # 大厅等太久就当散了，避免有人挂着「加入」永远不进
+        if time.time() - game.created_at > TEAM_LOBBY_SECONDS:
+            self.games.pop(game.key, None)
+            self._save_state()
+            return None
+        return game
+
+    def _open_team(self, event: AstrMessageEvent, theme: Theme, pool: str, size: int) -> str:
+        gid = event.get_group_id()
+        uid = event.get_sender_id()
+        if self._cfg("solo_only", False):
+            return f"当前只开独猜，发「{theme.command}」自己猜。"
+        if not gid:
+            return f"双人 / 多人只能在群里开，私聊发「{theme.command}」自己猜。"
+        if size > TEAM_MAX:
+            return f"最多 {TEAM_MAX} 人。"
+        if size == 1:
+            return f"一个人就发「{theme.command}」，不用带「双人」。"
+
+        tkey = SessionKey.team(gid, theme.key)
+        exist = self.games.get(tkey)
+        if exist and exist.is_team:
+            if exist.started:
+                return (
+                    f"群里已经有一局{theme.label}组队局在打了（{len(exist.members)} 人）。\n"
+                    f"发「加入」参与，或等它结束。"
+                )
+            names = "、".join(m.get("name") or "某人" for m in exist.members)
+            return f"房间已经开着了（{len(exist.members)} 人：{names}）。\n发「加入」进队。"
+
+        name = event.get_sender_name() or "房主"
+        game = Game(
+            key=tkey,
+            theme=theme.key,
+            umo=event.unified_msg_origin,
+            group_id=gid,
+            user_id=uid,
+            user_name=name,
+            target="",
+            pool=pool,
+            attempts=0,
+            mode="team",
+            members=[{"id": uid, "name": name}],
+            started=False,
+            team_size=size,
+        )
+        self.games[tkey] = game
+        self.active[SessionKey.user(gid, uid)] = theme.key
+        self._save_state()
+        want = f"要 {size} 人" if size else f"最多 {TEAM_MAX} 人"
+        how = f"凑齐 {size} 人自动开局" if size else "人齐后房主发「开始」"
+        return (
+            f"👥 {theme.command} · 组队局（{want}）\n"
+            f"难度：{theme.pool_label(pool)}\n"
+            f"房主：{name}\n"
+            f"别人发「加入」进队\n"
+            f"{how}\n"
+            f"{LEGEND}"
+        )
+
+    def _join_team(self, event: AstrMessageEvent) -> str:
+        if self._cfg("solo_only", False):
+            return "当前只开独猜。"
+        gid = event.get_group_id()
+        if not gid:
+            return "双人 / 多人只能在群里玩。"
+        game = self._lobby_of(event)
+        if not game:
+            running = self._team_of(event)
+            if running:
+                return f"这局{THEMES[running.theme].label}组队局已经开始了，等下一局吧。"
+            return "现在没有在招人的房间，房主发「弗一把 双人」开一个。"
+        uid = event.get_sender_id()
+        if game.has(uid):
+            return "你已经在队里了。"
+        if len(game.members) >= TEAM_MAX:
+            return f"房间满了（{TEAM_MAX} 人）。"
+        name = event.get_sender_name() or "某人"
+        game.members.append({"id": uid, "name": name})
+        self._save_state()
+        names = "、".join(m.get("name") or "某人" for m in game.members)
+        # 双人房这种人头固定的，凑齐就直接开
+        if len(game.members) >= 2 and len(game.members) >= self._team_target(game):
+            return self._launch_team(game)
+        return (
+            f"✅ {name} 加入（{len(game.members)} 人）\n"
+            f"当前：{names}\n"
+            f"房主发「开始」就出题。"
+        )
+
+    @staticmethod
+    def _team_target(game: Game) -> int:
+        """房间想凑几个人；「多人」没指定就是 TEAM_MAX。"""
+        return game.team_size or TEAM_MAX
+
+    def _start_team(self, event: AstrMessageEvent) -> str:
+        gid = event.get_group_id()
+        if not gid:
+            return "双人 / 多人只能在群里玩。"
+        game = self._lobby_of(event)
+        if not game:
+            running = self._team_of(event)
+            if running:
+                return f"这局{THEMES[running.theme].label}组队局已经在打了。"
+            return "没有等待开始的房间。"
+        if game.user_id != event.get_sender_id():
+            return f"只有房主（{game.user_name}）能开始。"
+        if len(game.members) < 2:
+            return "至少 2 个人，再等等。"
+        return self._launch_team(game)
+
+    def _launch_team(self, game: Game) -> str:
+        gid = game.group_id
+        theme = THEMES[game.theme]
+        db = self.dbs[game.theme]
+        pool = game.pool if db.pool(game.pool) else theme.default_pool
+        candidates = db.answer_pool(pool) or db.pool(pool)
+        game.target = theme.title_of(random.choice(candidates))
+        game.pool = pool
+        game.attempts = self._team_attempts(theme, len(game.members))
+        game.started = True
+        game.created_at = time.time()
+        self._spawn_timer(game)
+        for member in game.members:
+            self.active[SessionKey.user(gid, member["id"])] = game.theme
+        self._save_state()
+        order = " → ".join(m.get("name") or "某人" for m in game.members)
+        return (
+            f"👥 {theme.icon} {theme.command} · 组队局开始\n"
+            f"{len(game.members)} 人回合制：{order}\n"
+            f"难度：{theme.pool_label(pool)}\n"
+            f"机会：{game.attempts} 次（全队共用）\n"
+            f"依次猜，猜中全队记一胜\n"
+            f"👉 先由 {game.members[0].get('name') or '房主'} 猜\n"
+            f"指令 提示 放弃 战绩\n"
+            f"{LEGEND}"
+        )
+
+    @staticmethod
+    def _current_member(game: Game) -> dict | None:
+        if not game.members:
+            return None
+        return game.members[game.turn % len(game.members)]
+
+    def _team_attempts(self, theme: Theme, size: int) -> int:
+        base = self._attempts(theme)
+        return min(base + 8, base + 2 * max(0, size - 1))
 
     def _start_text(self, theme: Theme, db: PlayerDB, game: Game) -> str:
         minutes = int(self._cfg("timeout_minutes", 30) or 0)
@@ -1529,19 +1769,30 @@ class GuessProPlugin(Star):
         else:
             shown = f"{label}（{size} 人）"
         tail = f"\n其它题库 {others}" if others else ""
+        team_hint = ""
+        if not self._cfg("solo_only", False) and game.group_id:
+            team_hint = f"\n想一起猜发「{theme.command} 双人」"
         return (
             f"{theme.icon} {theme.command} · 猜{theme.label}\n"
             f"难度：{shown}\n"
             f"机会：{game.attempts} 次{limit}\n"
             f"直接发选手名就能猜，大小写不限\n"
-            f"指令 提示 放弃 战绩 排行 图鉴{tail}\n"
+            f"指令 提示 放弃 战绩 排行 图鉴{tail}{team_hint}\n"
             f"{LEGEND}"
         )
 
     # ---------------- 猜测 ----------------
 
-    def _apply_guess(self, game: Game, guess: dict[str, Any]) -> str:
+    def _apply_guess(self, game: Game, guess: dict[str, Any], who_id: str = "", who_name: str = "") -> str:
         theme = THEMES[game.theme]
+        if game.is_team and not game.started:
+            return "组队局还没开始，等房主发「开始」。"
+        if game.is_team:
+            # 回合制：只能轮到的那个人猜
+            now = self._current_member(game)
+            if now and who_id and now.get("id") != who_id:
+                left = game.attempts - len(game.guessed)
+                return f"现在轮到 {now.get('name')} 猜（还剩 {left} 次）。"
         db = self.dbs[game.theme]
         title = theme.title_of(guess)
         if title in game.guessed:
@@ -1559,11 +1810,12 @@ class GuessProPlugin(Star):
             self.games.pop(game.key, None)
             if game.task:
                 game.task.cancel()
-            self._settle_stats(game, won=True)
+            self._settle_stats(game, won=True, winner_id=who_id)
             self._save_state()
+            hit_head = f"🎉 {who_name} 猜中！" if game.is_team and who_name else "🎉 猜中了！"
             return (
-                f"{board}\n\n🎉 猜中了！{len(game.guessed)} 猜命中 {title}\n{theme.card(target)}\n"
-                + self._user_stats_text(game.group_id, game.user_id, game.theme)
+                f"{board}\n\n{hit_head}{len(game.guessed)} 猜命中 {title}\n{theme.card(target)}\n"
+                + self._user_stats_text(game.group_id, who_id or game.user_id, game.theme)
             )
 
         if len(game.guessed) >= game.attempts:
@@ -1572,20 +1824,33 @@ class GuessProPlugin(Star):
                 game.task.cancel()
             self._settle_stats(game, won=False)
             self._save_state()
+            if game.is_team:
+                return (
+                    f"{board}\n\n💀 {game.attempts} 次机会用完了，答案是 {title}\n{theme.card(target)}\n"
+                    f"全队都没猜出来，发「{theme.command} 多人」再来一局。"
+                )
             return (
                 f"{board}\n\n💀 {game.attempts} 次机会用完了，答案是 {title}\n{theme.card(target)}\n"
                 f"发送「{theme.command}」再来一局。"
             )
 
+        if game.is_team and game.members:
+            game.turn = (game.turn + 1) % len(game.members)
         self._save_state()
-        text = board
+
+        lines = [board]
         if self._cfg("show_legend", True) and len(game.guessed) == 1:
-            text += f"\n{LEGEND}"
-        if len(game.guessed) == game.attempts - 1:
-            text += "\n⚠️ 最后一次机会了。"
+            lines.append(LEGEND)
+        left = game.attempts - len(game.guessed)
+        if left == 1:
+            lines.append("⚠️ 最后一次机会了。")
         else:
-            text += f"\n还剩 {game.attempts - len(game.guessed)} 次机会"
-        return text
+            lines.append(f"还剩 {left} 次机会")
+        if game.is_team:
+            nxt = self._current_member(game)
+            if nxt:
+                lines.append(f"👉 轮到 {nxt.get('name')}")
+        return "\n".join(lines)
 
     def _with_at(self, event: AstrMessageEvent, text: str) -> list:
         if self._cfg("at_sender", True) and event.get_group_id():
@@ -1600,9 +1865,11 @@ class GuessProPlugin(Star):
             return "本插件已关闭提示功能。"
         theme_key = self._current_theme(event)
         theme = THEMES[theme_key]
-        game = self._game_of(event, theme_key)
+        game = self._play_game(event, theme_key)
         if not game:
-            return "现在没有进行中的对局，发送「弗一把」「足一把」或「撸一把」开局。"
+            return f"现在没有进行中的对局，发送「{theme.command}」开局。"
+        if game.is_team and not game.started:
+            return "组队局还没开始，等房主发「开始」。"
 
         limit = int(self._cfg("hint_limit", 2) or 0)
         if len(game.revealed) >= limit:
@@ -1623,16 +1890,23 @@ class GuessProPlugin(Star):
     def _giveup_text(self, event: AstrMessageEvent) -> str:
         theme_key = self._current_theme(event)
         theme = THEMES[theme_key]
-        game = self._game_of(event, theme_key)
+        game = self._play_game(event, theme_key)
         if not game:
             return "现在没有进行中的对局。"
+        if game.is_team and not game.started:
+            if game.user_id != event.get_sender_id():
+                return "组队局还没开始，等房主开始或者解散。"
+            self.games.pop(game.key, None)
+            self._save_state()
+            return "🚪 房间已解散。"
         self.games.pop(game.key, None)
         if game.task:
             game.task.cancel()
         self._settle_stats(game, won=False)
         self._save_state()
-        target = self.dbs[theme_key].get(game.target)
-        return f"🏳️ 已放弃。答案：{game.target}\n" + (theme.card(target) if target else "")
+        target = self.dbs[game.theme].get(game.target)
+        head = "🏳️ 组队局结束" if game.is_team else "🏳️ 已放弃"
+        return f"{head}。答案：{game.target}\n" + (theme.card(target) if target else "")
 
     def _stats_text(self, event: AstrMessageEvent) -> str:
         _ukey, gid, uid = self._pk(event)
@@ -1711,6 +1985,22 @@ class GuessProPlugin(Star):
         yield event.plain_result(self._giveup_text(event))
         event.stop_event()
 
+    @filter.command("加入", alias={"加我"})
+    async def join_team(self, event: AstrMessageEvent):
+        """加入群里的双人 / 多人房间"""
+        if not self._session_ok(event):
+            return
+        yield event.plain_result(self._join_team(event))
+        event.stop_event()
+
+    @filter.command("开始", alias={"开局"})
+    async def start_team(self, event: AstrMessageEvent):
+        """房主开始组队局"""
+        if not self._session_ok(event):
+            return
+        yield event.plain_result(self._start_team(event))
+        event.stop_event()
+
     @filter.command("战绩")
     async def my_stats(self, event: AstrMessageEvent):
         """查看当前题库的战绩"""
@@ -1754,6 +2044,11 @@ class GuessProPlugin(Star):
         lines.append("2. 直接发选手名就能猜（也支持「猜 xxx」）")
         lines.append(f"3. 每次猜测按各题库的属性逐格反馈：{LEGEND}")
         lines.append("4. 指令：提示 · 放弃 · 战绩 · 排行 · 图鉴 <名字>")
+        if self._cfg("solo_only", False):
+            lines.append("5. 当前只开独猜，每人各猜各的")
+        else:
+            lines.append("5. 组队：发「弗一把 双人」开房，别人发「加入」，凑齐自动开局")
+            lines.append("   「多人」最多 6 人，房主发「开始」；答案和机会全队共用")
         yield event.plain_result("\n".join(lines))
         event.stop_event()
 
@@ -1790,7 +2085,11 @@ class GuessProPlugin(Star):
         method = _BARE_COMMANDS.get(raw.lstrip("/／").strip())
         if method:
             theme_key = self._current_theme(event)
-            if method in _SILENT_WITHOUT_GAME and not self._game_of(event, theme_key):
+            if method == "_join_team" and not self._team_of(event):
+                return
+            if method == "_start_team" and not self._lobby_of(event):
+                return
+            if method in ("_hint_text", "_giveup_text") and not self._play_game(event, theme_key):
                 return
             event.stop_event()
             await event.send(event.plain_result(getattr(self, method)(event)))
@@ -1800,8 +2099,10 @@ class GuessProPlugin(Star):
         if not self._cfg("free_text_guess", True):
             return
         theme_key = self._current_theme(event)
-        game = self._game_of(event, theme_key)
+        game = self._play_game(event, theme_key)
         if not game or len(raw) > 32:
+            return
+        if game.is_team and not game.started:
             return
         query = _TRAILING_RE.sub("", _LEADING_RE.sub("", raw)).strip()
         if not query or re.search(r"[?？]$", raw):
@@ -1824,7 +2125,9 @@ class GuessProPlugin(Star):
 
         event.stop_event()
         async with self._lock:
-            text = self._apply_guess(game, candidates[0])
+            text = self._apply_guess(
+                game, candidates[0], event.get_sender_id(), event.get_sender_name() or ""
+            )
         await event.send(event.chain_result(self._with_at(event, text)))
 
     async def terminate(self) -> None:
