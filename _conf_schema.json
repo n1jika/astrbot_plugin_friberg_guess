@@ -64,6 +64,12 @@
     "type": "int",
     "default": 2
   },
+  "history_team": {
+    "description": "历史战队算接近",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后，猜的队伍只要是该选手效力过的老东家（例如用 ENCE 猜 sunpayus），「战队」格就判 🟨 接近；关闭则只有同队才绿、其余一律红。目前弗一把与撸一把有历史战队数据，默认关闭。"
+  },
   "show_legend": {
     "description": "首次猜测时附带颜色图例",
     "type": "bool",

@@ -230,6 +230,7 @@ https://github.com/weadee/astrbot_plugin_friberg_guess
 | `enable_cs` / `enable_football` / `enable_lol` / `enable_valorant` | 开 | 分题库开关 |
 | `free_text_guess` | 开 | 允许直接发名字猜 |
 | `enable_hint` / `hint_limit` | 开 / 2 | 提示功能 |
+| `history_team` | **关** | 猜的队伍是该选手效力过的老东家时，「战队」格判 🟨 接近；关掉则只有同队才绿、其余一律红（弗一把与撸一把有历史战队数据） |
 | `show_legend` | 开 | 第一次猜测附带图例 |
 | `at_sender` | 开 | 群聊反馈时 @ 人 |
 
@@ -304,8 +305,10 @@ Major 冠军 / 出场次数沿用原快照（见上面的已知限制）。
 - **复出**：autimatic（Without a Roof）、friberg（Johnny Speeds）、oskar（SINNERS Esports）、fox（SAW）
 - 中国选手：C4LLM3SU3 → Lynn Vision、dank1ng → TYLOO、kaze / childking → Rare Atom
 
-顺带把「历史战队」填上了（620 人有数据），所以**「战队」格现在会亮 🟨**：
-猜的队伍是答案选手效力过的老东家，就算接近。
+顺带把「历史战队」填上了（620 人有数据）。**但默认不算接近**：
+配置里的 `history_team` 默认关着，猜 ENCE 去猜 sunpayus 仍然只有 🟥；
+想让「效力过 = 🟨」就在插件配置里把它打开。撸一把的战队格同样受这个开关控制，
+它的「同赛区 → 🟨」不受影响。
 
 ## 撸一把题库
 

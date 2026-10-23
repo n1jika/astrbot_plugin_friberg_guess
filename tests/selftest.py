@@ -230,8 +230,15 @@ async def main() -> None:
         ]
     }
     ca, cb = m.THEMES["cs"].load(raw_cs)
+    # 默认关闭：老东家不算接近
+    check(m.Theme.history_team is False, "CS：历史战队默认关闭")
     tc = {c.label: (c.value, c.level) for c in m.THEMES["cs"].judge(ca, cb)}
-    check(tc["战队"] == ("Team Vitality", "close"), f"CS：效力过对方现队 → 黄（{tc['战队']}）")
+    check(tc["战队"] == ("Team Vitality", "wrong"), f"CS：关闭时老东家 → 红（{tc['战队']}）")
+    m.Theme.history_team = True
+    tc = {c.label: (c.value, c.level) for c in m.THEMES["cs"].judge(ca, cb)}
+    check(tc["战队"] == ("Team Vitality", "close"), f"CS：开启时老东家 → 黄（{tc['战队']}）")
+    m.Theme.history_team = False  # 还原，别影响后面的用例
+    tc = {c.label: (c.value, c.level) for c in m.THEMES["cs"].judge(ca, cb)}
     check(tc["国家"][1] == "correct" and tc["位置"][1] == "wrong", "CS：同国家绿 / 不同位置红")
     check(sum(1 for p in cs.players if p.get("team_history")) >= 500,
           f"CS 题库带历史战队（{sum(1 for p in cs.players if p.get('team_history'))} 人）")
@@ -271,7 +278,16 @@ async def main() -> None:
     check(cells["位置"][1] == "wrong", "LoL：位置不同 → 红")
     check(cells["国家"][1] == "close", "LoL：不同国家同大洲 → 黄")
     check(cells["大洲"][1] == "correct", "LoL：同大洲 → 绿")
-    check(cells["战队"][1] == "close" and cells["战队"][0] == "T1", "LoL：效力过对方现队 → 黄")
+    m.Theme.history_team = True
+    cells = {c.label: (c.value, c.level) for c in lol_theme.judge(ga, gb)}
+    check(cells["战队"][1] == "close" and cells["战队"][0] == "T1", "LoL：开启时效力过对方现队 → 黄")
+    m.Theme.history_team = False
+    cells = {c.label: (c.value, c.level) for c in lol_theme.judge(ga, gb)}
+    # T1 与 Gen.G 同在 LCK，关掉历史战队后靠同赛区仍然是黄
+    check(cells["战队"][1] == "close", "LoL：关闭历史战队后同赛区仍 → 黄")
+    # 跨赛区且没有效力过 → 红（A 的 T1 vs C 的 Team Liquid）
+    cross = {c.label: (c.value, c.level) for c in lol_theme.judge(ga, gc)}
+    check(cross["战队"][1] == "wrong", "LoL：跨赛区无渊源 → 红")
     check(cells["年龄"][1] == "wrong" and cells["年龄"][0].endswith("↓"), "LoL：年龄差 5 → 红 + 更小")
     check(cells["S赛参赛"][1] == "wrong" and cells["S赛参赛"][0].endswith("↓"), "LoL：S 赛次数差 3 → 红 + 更小")
     check(cells["S赛冠军"][1] == "wrong", "LoL：S 赛冠军必须一致")

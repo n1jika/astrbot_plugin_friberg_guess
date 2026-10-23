@@ -154,6 +154,9 @@ class Theme:
     default_pool: str = "normal"
     difficulty_hint: str = "普通"
 
+    # 猜的队伍是答案选手效力过的老东家时，算不算「接近」；由配置 history_team 控制
+    history_team: bool = False
+
     # -- 数据 --
     def load(self, raw: Any) -> list[dict]:
         raise NotImplementedError
@@ -269,8 +272,8 @@ class CSTheme(Theme):
         history = target.get("team_history") or []
         if guess.get("team") == target.get("team"):
             cells.append(Cell("战队", guess.get("team", "—"), "correct"))
-        elif guess.get("team") and guess["team"] in history:
-            cells.append(Cell("战队", guess["team"], "close"))
+        elif self.history_team and guess.get("team") and guess["team"] in history:
+            cells.append(Cell("战队", guess["team"], "close"))  # 关掉时老东家一律算不符
         else:
             cells.append(Cell("战队", guess.get("team", "—"), "wrong"))
 
@@ -675,13 +678,13 @@ class LolTheme(Theme):
         same_continent = bool(guess.get("_continent")) and guess.get("_continent") == target.get("_continent")
         cells.append(Cell("大洲", guess.get("_continent") or "—", "correct" if same_continent else "wrong"))
 
-        # 战队：同名=一致；效力过对方现队=接近；同赛区也接近
+        # 战队：同名=一致；效力过对方现队=接近（受 history_team 开关控制）；同赛区也接近
         g_team, t_team = guess.get("_team", ""), target.get("_team", "")
         g_hist = {t.lower() for t in guess.get("_history") or []}
         t_hist = {t.lower() for t in target.get("_history") or []}
         if g_team and g_team.lower() == t_team.lower():
             level = "correct"
-        elif g_team and (g_team.lower() in t_hist or t_team.lower() in g_hist):
+        elif self.history_team and g_team and (g_team.lower() in t_hist or t_team.lower() in g_hist):
             level = "close"
         elif guess.get("_region") and guess.get("_region") == target.get("_region"):
             level = "close"
@@ -1263,6 +1266,8 @@ class GuessProPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None) -> None:
         super().__init__(context)
         self.config: dict[str, Any] = config or {}
+        # 主题是类，开关统一挂在基类上
+        Theme.history_team = bool(self._cfg("history_team", False))
         self.dbs: dict[str, PlayerDB] = {
             key: PlayerDB(theme, DATA_DIR / theme.db_file) for key, theme in THEMES.items()
         }
