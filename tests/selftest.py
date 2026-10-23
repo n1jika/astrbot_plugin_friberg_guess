@@ -425,8 +425,8 @@ async def main() -> None:
     print("[12] 足一把范围与难度")
     fb_plugin = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
     cases = [
-        ("足一把", "all:easy", 298, 302),
-        ("足一把 易", "all:easy", 298, 302),
+        ("足一把", "all:easy", 248, 252),
+        ("足一把 易", "all:easy", 248, 252),
         ("足一把 中", "top5:normal", 900, 950),
         ("足一把 难", "all:hard", 1100, 1200),
         ("足一把 英超", "epl:easy", 145, 155),
@@ -447,8 +447,13 @@ async def main() -> None:
 
     fam = fb_plugin.dbs["football"].pool("all:easy")
     names = {p["cnName"] for p in fam}
-    check(len(fam) == 300, f"默认池正好 300 人（{len(fam)}）")
+    check(len(fam) == 250, f"默认池正好 250 人（{len(fam)}）")
     check(any(p["league"] == "已退役" for p in fam), "默认池包含退役巨星")
+    fb_ret = [p for p in fam if p["league"] == "已退役"]
+    fb_act = [p for p in fam if p["league"] != "已退役"]
+    check(len(fb_ret) == 60, f"易档退役限 60 人（{len(fb_ret)}）")
+    check(len(fb_act) == 190, f"易档其余 190 人全是现役（{len(fb_act)}）")
+    check(len({p["league"] for p in fb_act}) >= 4, "现役覆盖多个联赛")
     check(any(p["league"] in {"沙特联", "美职联", "土超", "巴甲"} for p in fam), "默认池包含小联赛巨星")
     for star in ("梅西", "C罗", "姆巴佩", "哈兰德", "齐达内", "大罗", "马尔蒂尼"):
         check(star in names, f"默认池包含 {star}")
@@ -540,10 +545,10 @@ async def main() -> None:
         if g_:
             fb_targets.add(g_.target)
     fb_pool = {fdb.theme.title_of(p) for p in fdb.answer_pool("all:easy")}
-    check(len(fb_pool) == 300 and fb_targets <= fb_pool, f"足球 20 局答案都来自 300 人池（{len(fb_pool)}）")
+    check(len(fb_pool) == 250 and fb_targets <= fb_pool, f"足球 20 局答案都来自 250 人池（{len(fb_pool)}）")
 
     fb_out = [p for p in fdb.players if fdb.theme.title_of(p) not in fb_pool]
-    check(len(fb_out) == 841, f"足球池外仍有 841 人可猜（{len(fb_out)}）")
+    check(len(fb_out) == 891, f"足球池外仍有 891 人可猜（{len(fb_out)}）")
     ev_fb_out = FakeEvent(text=fb_out[0]["name"], group="71000", user="fb-out", name="池外")
     await run_commands(fb2.start_football, FakeEvent(group="71000", user="fb-out"), "")
     await fb2.on_message(ev_fb_out)
@@ -557,8 +562,18 @@ async def main() -> None:
     if ldb.players:
         check(ldb.pool_size("easy") == len(ldb.answer_pool("easy")), "LoL 显示人数=可出题数")
         check(len(ldb.players) == 386, f"LoL 题库 386 人（{len(ldb.players)}）")
-        check(ldb.pool_size("easy") == 200, f"LoL 易档 200 人（{ldb.pool_size('easy')}）")
-        check(ldb.pool_size("normal") == 304, f"LoL 中档=现役 304 人（{ldb.pool_size('normal')}）")
+        check(ldb.pool_size("easy") == 150, f"LoL 易档 150 人（{ldb.pool_size('easy')}）")
+        check(ldb.pool_size("normal") == 250, f"LoL 中档 250 人（{ldb.pool_size('normal')}）")
+        lol_easy = {ldb.theme.title_of(p) for p in ldb.pool("easy")}
+        lol_normal = {ldb.theme.title_of(p) for p in ldb.pool("normal")}
+        lol_ret = [p for p in ldb.pool("normal") if not str(p.get("status", "")).lower().startswith("act")]
+        check(lol_easy <= lol_normal, "LoL 易档是「中」的子集")
+        check(len(lol_ret) >= 30, f"LoL 中档含知名退役（{len(lol_ret)} 人）")
+        lol_coach = [
+            p for p in ldb.pool("normal")
+            if p["status"] != "Active" and "教练" in (p.get("positions") or [])
+        ]
+        check(len(lol_coach) <= 3, f"LoL 中档的退役名额基本不塞教练（{len(lol_coach)} 个例外）")
         check(ldb.pool_size("hard") == 386, f"LoL 难档=全库（{ldb.pool_size('hard')}）")
         lol_pool = {ldb.theme.title_of(p) for p in ldb.answer_pool("easy")}
         check(not (lol_pool & ldb._ambiguous), "同名选手不会成为答案")

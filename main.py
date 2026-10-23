@@ -388,6 +388,17 @@ FAMOUS = {
     "马赫雷斯", "库利巴利", "米林科维奇-萨维奇", "菲利克斯", "布罗佐维奇", "纳乔",
     "鲁本·内维斯", "沃特金斯", "托尼", "坎特", "博格巴", "拉什福德",
     "布鲁诺·费尔南德斯", "麦迪逊", "凯尔·沃克", "戈登", "埃德森", "奥纳纳",
+    # 早退役但历史地位够的，不能因为没欧冠/世界杯数据就被当成路人
+    "贝肯鲍尔", "普约尔", "巴雷西", "哈维·阿隆索", "加图索", "因扎吉",
+    "比利亚", "费尔南多·托雷斯", "德尔·皮耶罗", "盖德·穆勒", "马斯切拉诺",
+    "卡恩", "亚亚·图雷", "斯内德", "阿什利·科尔", "西多夫", "里杰卡尔德",
+    "范德萨", "斯科尔斯", "罗纳德·科曼", "特里", "特维斯", "切赫",
+    "里奥·费迪南德", "维迪奇", "埃夫拉", "基耶利尼", "萨内蒂", "吉格斯",
+    "维埃拉", "罗伊·基恩", "德科", "里克尔梅", "古利特", "克鲁伊维特",
+    "弗兰", "克雷斯波", "巴蒂斯图塔", "范佩西", "尤西比奥", "舍甫琴科",
+    "内德维德", "马特乌斯", "坎通纳", "阿兰·希勒", "乔治·维阿", "阿德里亚诺",
+    "特雷泽盖", "阿内尔卡", "拉维奇", "卡索拉", "坎贝尔", "欧文·哈格里夫斯",
+    "博努奇", "法布雷加斯", "大卫·席尔瓦", "奥斯卡", "米尔纳",
 }
 
 SCOPE_LABELS = {
@@ -435,7 +446,7 @@ class FootballTheme(Theme):
                 scope, diff = "all", "hard"
             else:
                 return None
-        # 「易」（知名 200 人）和「难」都在全库取，「中」默认限定五大联赛
+        # 「易」（知名 250 人）和「难」都在全库取，「中」默认限定五大联赛
         if not scope:
             scope = "all" if diff in ("easy", "hard") else "top5"
         return f"{scope}:{diff}"
@@ -457,7 +468,7 @@ class FootballTheme(Theme):
         famous = _easy_pool(players)
         top5 = [p for p in players if p.get("league") in TOP5_LEAGUES]
         out = {
-            # 全库：易=知名 300 人（名人 + 豪门亲信），中=五大联赛，难=全部
+            # 全库：易=知名 250 人（现役 190 + 退役传奇 60），中=五大联赛，难=全部
             "all:easy": famous,
             "all:normal": top5 or players,
             "all:hard": players,
@@ -481,7 +492,7 @@ class FootballTheme(Theme):
         scope_label = SCOPE_LABELS.get(scope, scope)
         word = {"easy": "易", "normal": "中", "hard": "难"}.get(diff, diff)
         if scope == "all":
-            return {"easy": "易（知名 300 人）", "normal": "中（五大联赛）", "hard": "难（全量）"}.get(diff, word)
+            return {"easy": "易（知名 250 人）", "normal": "中（五大联赛）", "hard": "难（全量）"}.get(diff, word)
         return f"{scope_label} · {word}"
 
     def judge(self, guess: dict, target: dict) -> list[Cell]:
@@ -557,7 +568,9 @@ class FootballTheme(Theme):
         ]
 
 
-LOL_EASY_LIMIT = 200
+LOL_EASY_LIMIT = 150
+LOL_NORMAL_LIMIT = 250
+LOL_RETIRED_KEEP = 40  # 「中」档里给知名退役留多少名额
 LOL_HOT = [
     "Faker", "Chovy", "Knight", "Ruler", "Zeus", "Oner", "Gumayusi", "Keria",
     "Canyon", "ShowMaker", "Viper", "Scout", "Meiko", "Bin", "Xun", "Elk",
@@ -629,31 +642,55 @@ class LolTheme(Theme):
             player["gameId"].lower(),
         )
 
+    @staticmethod
+    def _retired_fame(player: dict) -> tuple:
+        """知名退役的排序：纯选手优先（教练转型的往后），再看 S 赛冠军与出场。"""
+        return (
+            1 if "教练" in (player.get("positions") or []) else 0,
+            -int(player.get("_worlds_title") or 0),
+            -int(player.get("_worlds_app") or 0),
+            player["gameId"].lower(),
+        )
+
     def pools(self, players: list[dict]) -> dict[str, list[dict]]:
-        active = [p for p in players if str(p.get("status", "")).lower().startswith("act")]
-        # 「易」：点名名单优先，其余按热度补到 200 人
+        def is_active(player: dict) -> bool:
+            return str(player.get("status", "")).lower().startswith("act")
+
+        @staticmethod
+        def take(seq, limit: int) -> list[dict]:
+            out: list[dict] = []
+            seen: set[str] = set()
+            for player in seq:
+                key = player["gameId"]
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(player)
+                if len(out) >= limit:
+                    break
+            return out
+
+        active = [p for p in players if is_active(p)]
+        retired = [p for p in players if not is_active(p)]
+
+        # 易：点名名单优先，其余按热度补到 150
         hot = [p for p in players if p["gameId"].lower() in LOL_HOT_KEYS]
-        rest = sorted(players, key=self._fame)
-        picked: list[dict] = []
-        seen: set[str] = set()
-        for player in hot + rest:
-            key = self.title_of(player)
-            if key in seen:
-                continue
-            seen.add(key)
-            picked.append(player)
-            if len(picked) >= LOL_EASY_LIMIT:
-                break
+        easy = take(hot + sorted(players, key=self._fame), LOL_EASY_LIMIT)
+
+        # 中：易档原样当底（保证易档能出的答案中档也能出），
+        # 再补一批知名退役和现役，凑满 250
+        keep_retired = sorted(retired, key=self._retired_fame)[:LOL_RETIRED_KEEP]
+        normal = take(easy + keep_retired + sorted(active, key=self._fame), LOL_NORMAL_LIMIT)
         return {
-            "easy": picked or players,
-            "normal": active or players,
+            "easy": easy or players,
+            "normal": normal or active or players,
             "hard": players,
         }
 
     def pool_label(self, pool: str) -> str:
         return {
-            "easy": "易（热门 200 人）",
-            "normal": "中（现役）",
+            "easy": "易（热门 150 人）",
+            "normal": "中（250 人 · 含退役）",
             "hard": "难（全量）",
         }.get(pool, pool)
 
@@ -751,19 +788,45 @@ class LolTheme(Theme):
 
 
 def _fame_score(player: dict) -> tuple:
-    """给「谁更容易被猜到」打分：传奇履历 + 豪门 + 退役身份。"""
+    """给「谁更容易被猜到」打分：传奇履历 + 豪门（退役不再额外加分）。"""
     return (
         1 if (player.get("ucl") or 0) > 0 else 0,
         1 if (player.get("wcTitle") or 0) > 0 else 0,
         int(player.get("wc") or 0),
         1 if player.get("club") in BIG_CLUBS else 0,
         int(player.get("ucl") or 0),
-        1 if player.get("league") == "已退役" else 0,
+    )
+
+
+FOOTBALL_EASY_LIMIT = 250
+FOOTBALL_RETIRED_CAP = 60  # 易档里最多留多少个退役传奇，早退役又没名气的自然挤不进来
+
+
+def _active_key(player: dict) -> tuple:
+    """现役球员的热度：进过名单 > 豪门 > 有欧冠 > 世界杯履历。"""
+    return (
+        1 if player.get("cnName") in FAMOUS else 0,
+        1 if player.get("club") in BIG_CLUBS else 0,
+        1 if (player.get("ucl") or 0) > 0 else 0,
+        1 if (player.get("wcTitle") or 0) > 0 else 0,
+        int(player.get("wc") or 0),
+        int(player.get("ucl") or 0),
+    )
+
+
+def _retired_key(player: dict) -> tuple:
+    """退役球员的热度：名字在名单里 > 世界杯冠军 > 欧冠 > 世界杯出场；同分时近代的靠前。"""
+    return (
+        1 if player.get("cnName") in FAMOUS else 0,
+        int(player.get("wcTitle") or 0),
+        int(player.get("ucl") or 0),
+        int(player.get("wc") or 0),
+        1 if int(player.get("birthYear") or 0) >= 1970 else 0,
     )
 
 
 def _famous_pool(players: list[dict], limit: int = 200) -> list[dict]:
-    """最出名的 200 人：先取名单内的，不够再按履历补齐。"""
+    """最出名的一批：名单内的优先，不够再按履历补齐。"""
     picked = [p for p in players if p.get("cnName") in FAMOUS]
     if len(picked) < limit:
         chosen = {p["cnName"] for p in picked}
@@ -776,19 +839,27 @@ def _famous_pool(players: list[dict], limit: int = 200) -> list[dict]:
     return picked[:limit]
 
 
-def _easy_pool(players: list[dict], limit: int = 300) -> list[dict]:
-    """「易」档：知名 200 人打底，再按「豪门 + 履历」补到 300 人，不整队照收。"""
-    picked = _famous_pool(players)
-    if len(picked) >= limit:
-        return picked[:limit]
+def _easy_pool(
+    players: list[dict], limit: int = FOOTBALL_EASY_LIMIT, retired_cap: int = FOOTBALL_RETIRED_CAP
+) -> list[dict]:
+    """「易」档：现役优先，退役只留最有名的一批。
 
-    chosen = {p.get("cnName") for p in picked}
-    extra = sorted(
-        (p for p in players if p.get("cnName") not in chosen),
-        key=lambda p: (1 if p.get("club") in BIG_CLUBS else 0, _fame_score(p)),
-        reverse=True,
-    )
-    return picked + extra[: limit - len(picked)]
+    以前是把退役也一起按履历补，结果 300 人里塞了 113 个老将，
+    连几十年前退役、年轻玩家不认识的也进来了。现在退役单独限额，
+    按「世界杯冠军 → 欧冠 → 世界杯出场」排序取前 60，剩下的名额全给现役。
+    """
+    active = [p for p in players if p.get("league") != "已退役"]
+    retired = [p for p in players if p.get("league") == "已退役"]
+
+    keep_ret = sorted(retired, key=_retired_key, reverse=True)[:retired_cap]
+    slots = max(0, limit - len(keep_ret))
+    out = sorted(active, key=_active_key, reverse=True)[:slots] + keep_ret
+
+    if len(out) < limit:  # 人不够就把剩下的现役按履历补进来
+        chosen = {p.get("cnName") for p in out}
+        more = [p for p in sorted(players, key=_active_key, reverse=True) if p.get("cnName") not in chosen]
+        out.extend(more[: limit - len(out)])
+    return out[:limit]
 
 
 def _league_easy(pool: list[dict], famous: list[dict], limit: int = 150) -> list[dict]:
