@@ -954,6 +954,18 @@ async def main() -> None:
     sub_cells = {c.label: (c.value, c.level) for c in m.THEMES["cs"].judge(sub, sub)}
     check(sub_cells["位置"][0] == "替补", f"替补在棋盘上显示中文（{sub_cells['位置'][0]}）")
 
+    squads: dict[str, list[dict]] = {}
+    for p in db8.players:
+        team = p.get("team") or ""
+        if p.get("is_active") and team and team not in ("退役", "未签约/已下放"):
+            squads.setdefault(team, []).append(p)
+    dup = {
+        t: [x["nickname"] for x in roster if x.get("role") == "AWPer"]
+        for t, roster in squads.items()
+        if sum(1 for x in roster if x.get("role") == "AWPer") > 1
+    }
+    check(not dup, f"全库没有一支队有多个 AWPer（{dup or '无'}）")
+
     print("\n全部自测通过 ✅")
     print("足球棋盘示例：\n" + m.render_board(fbt, 1, 10, haaland, rodri))
 
