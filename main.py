@@ -54,6 +54,15 @@ def normalize_name(text: str) -> str:
     return text.translate(_LEET_TABLE)
 
 
+# 位置显示：题库里多数沿用英文标签，替补这类新值给个中文叫法
+_ROLE_LABELS = {"Substitute": "替补", "Sub": "替补"}
+
+
+def role_label(role: Any) -> str:
+    text = str(role or "").strip()
+    return _ROLE_LABELS.get(text, text or "—")
+
+
 def split_nickname(nickname: str) -> tuple[str, str]:
     """拆出主体名与括号后缀，例如 `NiKo（波黑）` → (`NiKo`, `波黑`)。"""
     matched = _PAREN_RE.match((nickname or "").strip())
@@ -281,7 +290,7 @@ class CSTheme(Theme):
 
         cells.append(_diff_cell("年龄", int(guess.get("age") or 0), int(target.get("age") or 0), 3))
         same_role = guess.get("role") == target.get("role")
-        cells.append(Cell("位置", guess.get("role", "—"), "correct" if same_role else "wrong"))
+        cells.append(Cell("位置", role_label(guess.get("role")), "correct" if same_role else "wrong"))
         cells.append(
             _diff_cell("冠军", int(guess.get("major_championships") or 0), int(target.get("major_championships") or 0), 1)
         )
@@ -301,7 +310,7 @@ class CSTheme(Theme):
                 player.get("nationality", "—"),
                 player.get("region", "—"),
                 player.get("team", "—"),
-                player.get("role", "—"),
+                role_label(player.get("role")),
                 f"{player.get('age', '—')} 岁",
             ]
         )
@@ -315,7 +324,7 @@ class CSTheme(Theme):
 
     def hints(self, player: dict) -> list[tuple[str, str]]:
         return [
-            ("位置", f"打的是 {player.get('role', '—')}"),
+            ("位置", f"打的是 {role_label(player.get('role'))}"),
             ("赛区", f"来自 {player.get('region', '—')} 赛区"),
             ("国家", f"{player.get('nationality', '—')} 人"),
             ("冠军", f"Major 冠军 {player.get('major_championships', 0)} 次"),

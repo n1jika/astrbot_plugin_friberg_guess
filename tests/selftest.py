@@ -939,6 +939,21 @@ async def main() -> None:
     aps = [p["nickname"] for p in legacy if p.get("role") == "AWPer"]
     check(aps == ["try"], f"Legacy 只剩一个 AWPer（{aps}）")
 
+    gl = {p["nickname"]: p.get("role") for p in db8.players if p.get("team") == "GamerLegion"}
+    check(
+        gl.get("hypex") == "AWPer" and gl.get("rez") == "Rifler",
+        f"GamerLegion：hypex 当狙、rez 步枪（{gl.get('hypex')}/{gl.get('rez')}）",
+    )
+    tyloo = {p["nickname"]: p.get("role") for p in db8.players if p.get("team") == "TYLOO"}
+    check(tyloo.get("dank1ng") == "Substitute", "TYLOO：dank1ng 记成替补")
+    check(
+        [n for n, r in tyloo.items() if r == "AWPer"] == ["jee"],
+        "TYLOO 首发只剩 jee 一个狙",
+    )
+    sub = next(p for p in db8.players if p["nickname"] == "dank1ng")
+    sub_cells = {c.label: (c.value, c.level) for c in m.THEMES["cs"].judge(sub, sub)}
+    check(sub_cells["位置"][0] == "替补", f"替补在棋盘上显示中文（{sub_cells['位置'][0]}）")
+
     print("\n全部自测通过 ✅")
     print("足球棋盘示例：\n" + m.render_board(fbt, 1, 10, haaland, rodri))
 

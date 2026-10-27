@@ -525,6 +525,18 @@ def main() -> None:
     for nick, old, new in changed_country[:20]:
         log(f"   {nick:16s} {old} → {new}")
 
+    # 一支队正常只有一个主狙；冒出多个基本是信息框又写了「Rifler, AWPer」，提醒人工看一眼
+    squads: dict[str, list[str]] = {}
+    for p in players:
+        team = p.get("team") or ""
+        if p.get("is_active") and p.get("role") == "AWPer" and team not in ("退役", "未签约/已下放"):
+            squads.setdefault(team, []).append(p["nickname"])
+    dup = {t: n for t, n in squads.items() if len(n) > 1}
+    if dup:
+        log(f"⚠️ {len(dup)} 支队伍有多个 AWPer，需要人工确认：")
+        for team, names in dup.items():
+            log(f"   {team}: {', '.join(names)}")
+
     if not args.probe:
         db["version"] = f"{today.isoformat()}-liquipedia"
         db["players"] = players if not args.limit else db["players"]
