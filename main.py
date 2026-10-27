@@ -149,6 +149,7 @@ class Theme:
     label: str = ""  # 「CS Major 选手」
     icon: str = "🎮"
     db_file: str = ""
+    alias_file: str = ""  # 外号表（data 目录下的 json），留空表示不支持外号
     attempts: int = 8
     pool_alias: dict[str, str] = {}
     default_pool: str = "normal"
@@ -214,6 +215,7 @@ class CSTheme(Theme):
     label = "CS Major 选手"
     icon = "🔫"
     db_file = "players.json"
+    alias_file = "cs_aliases.json"
     attempts = 8
     pool_alias = {
         "易": "easy", "入门": "easy", "新手": "easy", "easy": "easy", "beginner": "easy",
@@ -1144,6 +1146,9 @@ class PlayerDB:
         self._index: dict[str, list[dict]] = {}
         self._pools: dict[str, list[dict]] = {}
         self._ambiguous: set[str] = set()
+        self.alias_version = ""
+        self.alias_report: dict[str, Any] = {"added": 0, "conflicts": [], "orphans": []}
+        self.single_char_aliases: set[str] = set()
         self.load()
 
     def load(self) -> None:
@@ -1162,6 +1167,7 @@ class PlayerDB:
                 if normalized:
                     self._index.setdefault(normalized, []).append(player)
         self._pools = self.theme.pools(self.players)
+        self._load_aliases()
         # 同名选手（如 LoL 里两个 Ace）不能当答案：否则猜中了也可能判到另一个人身上
         counter: dict[str, int] = {}
         for player in self.players:
@@ -1181,6 +1187,66 @@ class PlayerDB:
             -int(player.get("major_appearances") or player.get("worldsCount") or 0),
             len(str(player.get("nickname") or player.get("name") or player.get("gameId") or "")),
         )
+
+    def _locate(self, target: str) -> dict | None:
+        """按 title / 昵称 / 主体名找选手，同名时取最显眼的那个。"""
+        found = self.get(target)
+        if found:
+            return found
+        hits = self._index.get(normalize_name(target)) or []
+        if not hits:
+            return None
+        return sorted(hits, key=self._prominence)[0]
+
+    def _load_aliases(self) -> None:
+        """把外号挂进检索索引，这样「虾哥」「载物」也能当猜测提交。
+
+        外号撞上别人的正式昵称时直接跳过——宁可少一条，也不要把两个人的判断搅混。
+        """
+        name = getattr(self.theme, "alias_file", "")
+        if not name:
+            return
+        path = self.path.parent / name
+        if not path.exists():
+            return
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(f"[{PLUGIN_NAME}] 外号表 {name} 读取失败：{exc}")
+            return
+        mapping = raw.get("players") if isinstance(raw, dict) else raw
+        if not isinstance(mapping, dict):
+            return
+        self.alias_version = str(raw.get("version") or "") if isinstance(raw, dict) else ""
+        self.single_char_aliases = set()
+        added, conflicts, orphans = 0, [], []
+        for target, names in mapping.items():
+            player = self._locate(target)
+            if not player:
+                orphans.append(target)
+                continue
+            aliases = [names] if isinstance(names, str) else list(names or [])
+            for alias in aliases:
+                key = normalize_name(str(alias))
+                if not key:
+                    continue
+                bucket = self._index.get(key)
+                if bucket is None:
+                    self._index[key] = [player]
+                    added += 1
+                    if len(key) == 1:
+                        self.single_char_aliases.add(key)
+                elif player in bucket:
+                    continue
+                else:
+                    conflicts.append(f"{alias}→{target}")
+        if added or conflicts or orphans:
+            logger.info(
+                f"[{PLUGIN_NAME}] {self.theme.label}外号 {added} 条"
+                + (f"，{len(conflicts)} 条与昵称冲突已跳过" if conflicts else "")
+                + (f"，{len(orphans)} 个选手没对上" if orphans else "")
+            )
+        self.alias_report = {"added": added, "conflicts": conflicts, "orphans": orphans}
 
     def pool(self, name: str) -> list[dict]:
         players = self._pools.get(name) or self.players
@@ -2325,6 +2391,8 @@ class GuessProPlugin(Star):
         attempts = self._attempts(THEMES["cs"])
         lines.append(f"1. 发「弗一把」「足一把」「撸一把」开局，默认 {attempts} 次机会，可用难度词")
         lines.append("2. 直接发选手名就能猜（也支持「猜 xxx」）")
+        if self.dbs["cs"].alias_report.get("added"):
+            lines.append("   弗一把也认外号：虾哥=NiKo、载物=ZywOo、小孩=m0NESY、大表哥=karrigan…")
         lines.append(f"3. 每次猜测按各题库的属性逐格反馈：{LEGEND}")
         lines.append("4. 指令：提示 · 放弃 · 战绩 · 排行 · 图鉴 <名字>")
         if self._cfg("solo_only", False):
@@ -2394,8 +2462,10 @@ class GuessProPlugin(Star):
         query = _TRAILING_RE.sub("", _LEADING_RE.sub("", raw)).strip()
         if not query or re.search(r"[?？]$", raw):
             return
-
         db = self.dbs[theme_key]
+        # 单字外号（「虾」「驴」）太容易撞上日常聊天，必须带「猜」才认
+        if normalize_name(query) in db.single_char_aliases and not _LEADING_RE.match(raw):
+            return
         kind, candidates = db.match(query)
         if not candidates:
             return

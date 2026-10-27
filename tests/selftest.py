@@ -882,6 +882,47 @@ async def main() -> None:
     check(room7.key in tp7.games and room7.round_no == 2, "作废后照样进下一局")
     check(not any(room7.scores.values()), "作废的一局不计分")
 
+    print("[20] 弗一把外号：CS 选手可以用外号猜")
+    tp8 = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    G8 = "75000"
+    db8 = tp8.dbs["cs"]
+    rep = db8.alias_report
+    check(
+        rep["added"] >= 60 and not rep["conflicts"] and not rep["orphans"],
+        f"外号表全部挂上（{rep['added']} 条，冲突 {len(rep['conflicts'])}，孤儿 {len(rep['orphans'])}）",
+    )
+    hits = db8.find("虾哥")
+    check(
+        len(hits) == 1 and m.THEMES["cs"].title_of(hits[0]) == "NiKo（波黑）",
+        "「虾哥」唯一命中 NiKo",
+    )
+    check(
+        m.THEMES["football"].alias_file == "" and m.THEMES["lol"].alias_file == "",
+        "其它题库没接外号，不受影响",
+    )
+
+    await tp8.on_message(FakeEvent(text="弗一把", group=G8, user="l1", name="阿明"))
+    check(m.SessionKey.game(G8, "l1", "cs") in tp8.games, "弗一把开局")
+
+    ev_alias = FakeEvent(text="载物", group=G8, user="l1", name="阿明")
+    await tp8.on_message(ev_alias)
+    body = _flatten(ev_alias.results[0]) if ev_alias.results else ""
+    check("第 1/" in body and "ZywOo" in body, f"外号「载物」直接当猜测提交（{body[:16]}）")
+
+    ev_single = FakeEvent(text="虾", group=G8, user="l1", name="阿明")
+    await tp8.on_message(ev_single)
+    check(not ev_single.results and not ev_single.stopped, "单字外号「虾」不抢日常聊天")
+
+    ev_single2 = FakeEvent(text="猜 虾", group=G8, user="l1", name="阿明")
+    await tp8.on_message(ev_single2)
+    body = _flatten(ev_single2.results[0]) if ev_single2.results else ""
+    check("第 2/" in body and "NiKo" in body, f"「猜 虾」认成 NiKo（{body[:16]}）")
+
+    ev_card = FakeEvent(text="图鉴 载物", group=G8, user="l1", name="阿明")
+    await tp8.on_message(ev_card)
+    body = _flatten(ev_card.results[0]) if ev_card.results else ""
+    check("ZywOo" in body, "图鉴也认外号")
+
     print("\n全部自测通过 ✅")
     print("足球棋盘示例：\n" + m.render_board(fbt, 1, 10, haaland, rodri))
 

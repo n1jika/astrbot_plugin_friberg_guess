@@ -129,6 +129,24 @@ Bot ：第 2/8 猜｜ZmjjKK
 | `图鉴 哈兰德` | 查选手资料（先查当前题库，找不到再翻其它题库） |
 | `猜选手帮助` | 玩法说明 |
 
+### 弗一把认外号
+
+CS 圈的叫法比 ID 好用，所以弗一把额外挂了一张外号表 `data/cs_aliases.json`（64 条，来自 sb6657 烂梗插件的
+外号对照表 v1.3.0，另补了少量高频叫法），可以直接拿外号当猜测提交，也能用来查图鉴：
+
+```
+阿明：虾哥           → 按 NiKo（波黑）判定
+阿明：载物           → ZywOo
+阿明：图鉴 小孩       → 查 m0NESY 的资料
+```
+
+- 覆盖 31 位选手：NiKo / device / s1mple / m0NESY / ZywOo / donk / ropz / Twistzz / frozen / kyousuke /
+  karrigan / dupreeh / Magisk / Xyp9x / broky / rain / cadiaN / aleksib / TeSeS / YEKINDAR / FalleN / Jame /
+  kennyS / Snax / pashaBiceps / degster / HooXi / XANTARES / huNter- / blameF / electroNic
+- 单字外号（`虾`、`驴`）必须写成 `猜 虾`，否则不抢群里的日常聊天
+- 外号撞上别人的正式昵称时会被跳过，绝不把两个人的判定搅混
+- 想加外号直接改 `data/cs_aliases.json`：键写 `players.json` 里的 nickname，值是外号数组，重启即生效
+
 ### 难度：易 / 中 / 难
 
 四个题库共用一套难度词，开局时临时指定，或在配置里设默认值：
@@ -329,6 +347,7 @@ https://github.com/weadee/astrbot_plugin_friberg_guess
 | 文件 | 内容 | 来源 |
 | --- | --- | --- |
 | `data/players.json` | 646 位 CS Major 选手 | 社区整理版本（快照 2026-08-04）+ [Liquipedia](https://liquipedia.net/counterstrike) 选手页刷新的现队 / 状态 / 角色 / 年龄，用 `tools/enrich_cs_db.py` 更新 |
+| `data/cs_aliases.json` | 64 条 CS 外号（31 位选手） | sb6657 烂梗插件外号对照表 v1.3.0 + CS 圈常见叫法，手工维护 |
 | `data/football_players.json` | 1141 位足球球员 | 足一把 `players.js`（2026-27 赛季初） |
 | `data/lol_players.json` | 386 位 LoL 选手（现役 + 知名退役） | [guessassin](https://guessassin.xyz) 的选手接口（战队 / S 赛）+ [Liquipedia](https://liquipedia.net/leagueoflegends) 选手页（真名 / 别名），用 `tools/enrich_lol_db.py` 生成 |
 | `data/valorant_players.json` | 543 位瓦罗兰特选手 | [瓦一把](https://wayiba.com) 站点 `players.generated.json`，用 `tools/build_valorant_db.py` 生成 |
