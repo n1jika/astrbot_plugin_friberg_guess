@@ -70,6 +70,12 @@
     "type": "int",
     "default": 2
   },
+  "duel_hint": {
+    "description": "双人局后手的提示次数",
+    "type": "int",
+    "default": 2,
+    "hint": "双人局按先后手分配提示：先手固定没有提示，后手每局可以看这么多次。只影响 2 人局，独猜和多人局仍用上面的「每局提示次数」。"
+  },
   "history_team": {
     "description": "历史战队算接近",
     "type": "bool",

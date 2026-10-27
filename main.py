@@ -1253,10 +1253,20 @@ class Game:
     guessed_by: list[str] = field(default_factory=list)  # 每次猜的人名，和 guessed 一一对应
     team_size: int = 0  # 房间想凑几个人（0 = 不限，凑满 TEAM_MAX）
     turn: int = 0  # 回合制：轮到第几个队员
+    # 双人赛制：best_of=3 表示三局两胜；0 表示一局定胜负
+    best_of: int = 0
+    round_no: int = 1  # 当前第几局（仅 BO3 会变）
+    scores: dict[str, int] = field(default_factory=dict)  # uid → 本场已赢局数
+    hint_used: dict[str, int] = field(default_factory=dict)  # uid → 本局已用提示次数
+    guesses_done: int = 0  # 已结束的局累计用掉的猜测次数（结算用）
 
     @property
     def is_team(self) -> bool:
         return self.mode == "team"
+
+    @property
+    def is_bo3(self) -> bool:
+        return self.best_of >= 3 and self.is_team
 
     def has(self, user_id: str) -> bool:
         return any(m.get("id") == user_id for m in self.members)
@@ -1281,6 +1291,11 @@ class Game:
             "guessed_by": self.guessed_by,
             "team_size": self.team_size,
             "turn": self.turn,
+            "best_of": self.best_of,
+            "round_no": self.round_no,
+            "scores": self.scores,
+            "hint_used": self.hint_used,
+            "guesses_done": self.guesses_done,
         }
 
     @classmethod
@@ -1304,6 +1319,11 @@ class Game:
             guessed_by=list(data.get("guessed_by") or []),
             team_size=int(data.get("team_size") or 0),
             turn=int(data.get("turn") or 0),
+            best_of=int(data.get("best_of") or 0),
+            round_no=int(data.get("round_no") or 1),
+            scores={str(k): int(v) for k, v in (data.get("scores") or {}).items()},
+            hint_used={str(k): int(v) for k, v in (data.get("hint_used") or {}).items()},
+            guesses_done=int(data.get("guesses_done") or 0),
         )
 
 
@@ -1345,17 +1365,24 @@ _TEAM_WORDS = ("双人", "多人")
 TEAM_MAX = 6  # 一个房间最多几个人
 TEAM_LOBBY_SECONDS = 300  # 房间最多等人等多久
 _MODE_RE = re.compile(rf"^({'|'.join(_TEAM_WORDS)})\s*(\d+)?\s*(.*)$")
+# 双人赛制：三局两胜。写成 bo3 / BO3 / 三局两胜 / best of 3 都认
+_BO3_RE = re.compile(r"(?<![a-z0-9])(?:bo3|best\s*of\s*3|三局两胜)(?![a-z0-9])", re.I)
 
 
-def _split_mode(raw: str) -> tuple[str, int, str]:
-    """把「双人」「多人 4 难」拆成 (模式, 人数, 剩余难度词)。"""
+def _split_mode(raw: str) -> tuple[str, int, int, str]:
+    """把「双人」「多人 4 难」「双人 bo3」拆成 (模式, 人数, 赛制, 剩余难度词)。"""
     text = (raw or "").strip()
     head = _MODE_RE.match(text)
     if not head:
-        return "solo", 0, text
+        best_of = 3 if _BO3_RE.search(text) else 0
+        rest = _BO3_RE.sub(" ", text).strip() if best_of else text
+        return "solo", 0, best_of, rest
     word, num, rest = head.group(1), head.group(2), (head.group(3) or "").strip()
     size = int(num) if num else (2 if word == "双人" else 0)
-    return "team", size, rest
+    best_of = 3 if _BO3_RE.search(rest) else 0
+    if best_of:
+        rest = _BO3_RE.sub(" ", rest).strip()
+    return "team", size, best_of, rest
 
 
 # 不带唤醒前缀时也能用的口令 → 插件方法名
@@ -1496,8 +1523,10 @@ class GuessProPlugin(Star):
         db = self.dbs.get(game.theme)
         target = db.get(game.target) if db else None
         title = theme.label if theme else "对局"
+        what = f"第 {game.round_no} 局" if game.is_bo3 else "这一局"
+        extra = f"（比分 {self._bo3_score_text(game)}）\n" if game.is_bo3 else ""
         text = (
-            f"⏳ 时间到，{title}这一局结束。答案：{game.target}\n"
+            f"⏳ 时间到，{title}{what}结束。{extra}答案：{game.target}\n"
             + (theme.card(target) + "\n" if theme and target else "")
             + f"发送「{theme.command if theme else '弗一把'}」再来一局。"
         )
@@ -1506,8 +1535,11 @@ class GuessProPlugin(Star):
 
     # ---------------- 战绩 ----------------
 
-    def _settle_stats(self, game: Game, won: bool, winner_id: str = "") -> None:
+    def _settle_stats(
+        self, game: Game, won: bool, winner_id: str = "", only_winner: bool = False
+    ) -> None:
         # 组队局全队各记一局；猜中的那个人额外留个记号
+        # only_winner=True 用于 BO3：只有赢下整场的那个人记胜
         members = (
             [m for m in game.members if m.get("id")]
             if game.is_team and game.members
@@ -1521,8 +1553,12 @@ class GuessProPlugin(Star):
             user["name"] = member.get("name") or user.get("name", "")
             user["plays"] = int(user.get("plays", 0)) + 1
             # 组队局记团队用了几次，和个人「最少 N 猜」的口径保持一致
-            user["guesses"] = int(user.get("guesses", 0)) + len(game.guessed)
-            if won:
+            user["guesses"] = (
+                int(user.get("guesses", 0))
+                + int(getattr(game, "guesses_done", 0))
+                + len(game.guessed)
+            )
+            if won and (not only_winner or member["id"] == winner_id):
                 user["wins"] = int(user.get("wins", 0)) + 1
                 best = len(game.guessed)
                 if not user.get("best") or best < int(user["best"]):
@@ -1621,7 +1657,9 @@ class GuessProPlugin(Star):
                 )
             return f"{theme.label}题库没加载成功，检查 data/{theme.db_file}。"
 
-        mode, size, rest = _split_mode(raw_difficulty)
+        mode, size, best_of, rest = _split_mode(raw_difficulty)
+        if mode == "solo" and best_of:
+            return f"BO3 是双人赛制：发「{theme.command} 双人 bo3」开一场三局两胜。"
         ukey, gid, uid = self._pk(event)
         default_pool = str(self._cfg("difficulty", "") or self._cfg("default_difficulty", "易"))
         pool = theme.resolve_pool(rest, default_pool)
@@ -1631,7 +1669,7 @@ class GuessProPlugin(Star):
             pool = theme.default_pool
 
         if mode == "team":
-            return self._open_team(event, theme, pool, size)
+            return self._open_team(event, theme, pool, size, best_of)
 
         gkey = SessionKey.game(gid, uid, theme_key)
         if gkey in self.games:
@@ -1681,7 +1719,9 @@ class GuessProPlugin(Star):
             return None
         return game
 
-    def _open_team(self, event: AstrMessageEvent, theme: Theme, pool: str, size: int) -> str:
+    def _open_team(
+        self, event: AstrMessageEvent, theme: Theme, pool: str, size: int, best_of: int = 0
+    ) -> str:
         gid = event.get_group_id()
         uid = event.get_sender_id()
         if self._cfg("solo_only", False):
@@ -1692,6 +1732,8 @@ class GuessProPlugin(Star):
             return f"最多 {TEAM_MAX} 人。"
         if size == 1:
             return f"一个人就发「{theme.command}」，不用带「双人」。"
+        if best_of and size != 2:
+            return f"BO3 只支持双人赛：发「{theme.command} 双人 bo3」。"
 
         tkey = SessionKey.team(gid, theme.key)
         exist = self.games.get(tkey)
@@ -1719,18 +1761,26 @@ class GuessProPlugin(Star):
             members=[{"id": uid, "name": name}],
             started=False,
             team_size=size,
+            best_of=best_of,
         )
         self.games[tkey] = game
         self.active[SessionKey.user(gid, uid)] = theme.key
         self._save_state()
         want = f"要 {size} 人" if size else f"最多 {TEAM_MAX} 人"
         how = f"凑齐 {size} 人自动开局" if size else "人齐后房主发「开始」"
+        rules = " · 三局两胜" if best_of else ""
+        duel = (
+            f"本局先手没提示、后手 {self._duel_hint()} 次（每局换个先手）\n"
+            if best_of
+            else ""
+        )
         return (
-            f"👥 {theme.command} · 组队局（{want}）\n"
+            f"👥 {theme.command} · 组队局（{want}{rules}）\n"
             f"难度：{theme.pool_label(pool)}\n"
             f"房主：{name}\n"
             f"别人发「加入」进队\n"
             f"{how}\n"
+            f"{duel}"
             f"{LEGEND}"
         )
 
@@ -1769,6 +1819,39 @@ class GuessProPlugin(Star):
         """房间想凑几个人；「多人」没指定就是 TEAM_MAX。"""
         return game.team_size or TEAM_MAX
 
+    def _duel_hint(self) -> int:
+        """双人局后手每局的提示次数（先手固定 0 次）。"""
+        try:
+            return max(0, int(self._cfg("duel_hint", 2) or 0))
+        except (TypeError, ValueError):
+            return 2
+
+    @staticmethod
+    def _first_index(game: Game) -> int:
+        """本局先手：BO3 每局换一个人先，其余赛制固定在队首。"""
+        if not game.members:
+            return 0
+        if not game.best_of:
+            return 0
+        return (max(1, game.round_no) - 1) % len(game.members)
+
+    def _first_member(self, game: Game) -> dict | None:
+        if not game.members:
+            return None
+        return game.members[self._first_index(game)]
+
+    def _round_brief(self, game: Game) -> list[str]:
+        """双人局的先后手提示额度说明（多人局不适用）。"""
+        if not game.is_team or len(game.members) != 2:
+            return []
+        first = game.members[self._first_index(game)]
+        second = game.members[(self._first_index(game) + 1) % 2]
+        quota = self._duel_hint()
+        return [
+            f"本局先手：{first.get('name') or '某人'}（没提示）",
+            f"本局后手：{second.get('name') or '某人'}（{quota} 次提示）",
+        ]
+
     def _start_team(self, event: AstrMessageEvent) -> str:
         gid = event.get_group_id()
         if not gid:
@@ -1796,21 +1879,38 @@ class GuessProPlugin(Star):
         game.attempts = self._team_attempts(theme, len(game.members))
         game.started = True
         game.created_at = time.time()
+        game.round_no = 1
+        game.scores = {m["id"]: 0 for m in game.members if m.get("id")}
+        game.hint_used = {}
+        game.guesses_done = 0
+        game.turn = self._first_index(game)
         self._spawn_timer(game)
         for member in game.members:
             self.active[SessionKey.user(gid, member["id"])] = game.theme
         self._save_state()
         order = " → ".join(m.get("name") or "某人" for m in game.members)
-        return (
-            f"👥 {theme.icon} {theme.command} · 组队局开始\n"
-            f"{len(game.members)} 人回合制：{order}\n"
-            f"难度：{theme.pool_label(pool)}\n"
-            f"机会：{game.attempts} 次（全队共用）\n"
-            f"依次猜，猜中全队记一胜\n"
-            f"👉 先由 {game.members[0].get('name') or '房主'} 猜\n"
-            f"指令 提示 放弃 战绩\n"
-            f"{LEGEND}"
+        lines = [
+            f"👥 {theme.icon} {theme.command} · 组队局开始",
+            f"{len(game.members)} 人回合制：{order}",
+        ]
+        if game.is_bo3:
+            lines.append(f"赛制：三局两胜（先赢 {game.best_of // 2 + 1} 局）")
+        lines.append(f"难度：{theme.pool_label(pool)}")
+        lines.append(
+            f"机会：{game.attempts} 次（每局重置）"
+            if game.is_bo3
+            else f"机会：{game.attempts} 次（全队共用）"
         )
+        lines.extend(self._round_brief(game))
+        lines.append(
+            "回合制轮流猜，谁猜中谁拿这一局"
+            if game.is_bo3
+            else "依次猜，猜中全队记一胜"
+        )
+        lines.append(f"👉 先由 {game.members[self._first_index(game)].get('name') or '房主'} 猜")
+        lines.append("指令 提示 放弃 战绩")
+        lines.append(LEGEND)
+        return "\n".join(lines)
 
     @staticmethod
     def _current_member(game: Game) -> dict | None:
@@ -1821,6 +1921,92 @@ class GuessProPlugin(Star):
     def _team_attempts(self, theme: Theme, size: int) -> int:
         base = self._attempts(theme)
         return min(base + 8, base + 2 * max(0, size - 1))
+
+    # ---------------- 双人 BO3 ----------------
+
+    @staticmethod
+    def _bo3_score_text(game: Game) -> str:
+        return " : ".join(
+            f"{m.get('name') or '某人'} {int(game.scores.get(m.get('id'), 0))}"
+            for m in game.members
+        )
+
+    def _reset_round(self, game: Game) -> None:
+        """BO3 开下一局：换答案、清棋盘、重置机会，先手按局数轮换。"""
+        theme = THEMES[game.theme]
+        db = self.dbs[game.theme]
+        candidates = db.answer_pool(game.pool) or db.pool(game.pool)
+        game.target = theme.title_of(random.choice(candidates))
+        game.guessed = []
+        game.guessed_by = []
+        game.revealed = []
+        game.hint_used = {}
+        game.attempts = self._team_attempts(theme, len(game.members))
+        game.turn = self._first_index(game)
+        game.created_at = time.time()
+        if game.task:
+            game.task.cancel()
+            game.task = None
+        self._spawn_timer(game)
+
+    def _bo3_round_end(
+        self,
+        game: Game,
+        theme: Theme,
+        board: str,
+        title: str,
+        target: dict[str, Any],
+        hit_id: str = "",
+        hit_name: str = "",
+    ) -> str:
+        """BO3 里一局打完：分出名次就收场，没分出来就接着打下一局。"""
+        if hit_id:
+            game.scores[hit_id] = int(game.scores.get(hit_id, 0)) + 1
+        need = game.best_of // 2 + 1
+        leader = [m for m in game.members if int(game.scores.get(m.get("id"), 0)) >= need]
+        over = bool(leader) or game.round_no >= game.best_of
+
+        if over:
+            self.games.pop(game.key, None)
+            if game.task:
+                game.task.cancel()
+            winner = leader[0] if leader else None
+            self._settle_stats(
+                game,
+                won=bool(winner),
+                winner_id=winner.get("id") if winner else "",
+                only_winner=True,
+            )
+            self._save_state()
+            score = self._bo3_score_text(game)
+            if winner:
+                head = f"🏆 三局两胜打完了：{winner.get('name') or '某人'} 拿下"
+            else:
+                head = f"🤝 {game.best_of} 局打完，谁都没到 {need} 胜，算平局"
+            return (
+                f"{board}\n\n{head}\n"
+                f"比分：{score}\n"
+                f"最后一局答案：{title}\n{theme.card(target)}\n"
+                f"发「{theme.command} 双人 bo3」再来一场。"
+            )
+
+        game.guesses_done += len(game.guessed)
+        game.round_no += 1
+        self._reset_round(game)
+        self._save_state()
+        score = self._bo3_score_text(game)
+        lines = [board, ""]
+        if hit_name:
+            lines.append(f"✅ 本局 {hit_name} 拿下，比分 {score}")
+        else:
+            lines.append(f"💀 本局没人猜中，答案是 {title}")
+            lines.append(f"比分 {score}（本局作废，不计分）")
+        lines.append(f"—— 第 {game.round_no} 局 ——")
+        lines.extend(self._round_brief(game))
+        lines.append(
+            f"👉 先由 {game.members[self._first_index(game)].get('name') or '某人'} 猜"
+        )
+        return "\n".join(lines)
 
     def _start_text(self, theme: Theme, db: PlayerDB, game: Game) -> str:
         minutes = int(self._cfg("timeout_minutes", 30) or 0)
@@ -1878,6 +2064,10 @@ class GuessProPlugin(Star):
         board = render_board(theme, len(game.guessed), game.attempts, guess, target)
 
         if all(c.level == "correct" for c in cells):
+            if game.is_bo3:
+                return self._bo3_round_end(
+                    game, theme, board, title, target, hit_id=who_id, hit_name=who_name
+                )
             self.games.pop(game.key, None)
             if game.task:
                 game.task.cancel()
@@ -1890,6 +2080,8 @@ class GuessProPlugin(Star):
             )
 
         if len(game.guessed) >= game.attempts:
+            if game.is_bo3:
+                return self._bo3_round_end(game, theme, board, title, target)
             self.games.pop(game.key, None)
             if game.task:
                 game.task.cancel()
@@ -1942,9 +2134,22 @@ class GuessProPlugin(Star):
         if game.is_team and not game.started:
             return "组队局还没开始，等房主发「开始」。"
 
-        limit = int(self._cfg("hint_limit", 2) or 0)
-        if len(game.revealed) >= limit:
-            return f"提示已经用完了（每局 {limit} 次）。"
+        # 双人局按人给额度：先手 0 次、后手 duel_hint 次，每局重置
+        uid = event.get_sender_id()
+        duel = game.is_team and len(game.members) == 2
+        if duel:
+            first = self._first_member(game)
+            quota = self._duel_hint()
+            if first and first.get("id") == uid:
+                return f"本局你是先手，没有提示（后手有 {quota} 次）。"
+            used = int(game.hint_used.get(uid, 0))
+            if used >= quota:
+                return f"本局的 {quota} 次提示用完了。" if quota else "本局没有提示额度。"
+        else:
+            quota = int(self._cfg("hint_limit", 2) or 0)
+            used = len(game.revealed)
+            if used >= quota:
+                return f"提示已经用完了（每局 {quota} 次）。"
         target = self.dbs[theme_key].get(game.target)
         if not target:
             self.games.pop(game.key, None)
@@ -1955,8 +2160,13 @@ class GuessProPlugin(Star):
             return "没什么可提示的了，直接猜吧。"
         label, value = random.choice(pool)
         game.revealed.append(label)
+        if duel:
+            game.hint_used[uid] = used + 1
+            left = quota - game.hint_used[uid]
+        else:
+            left = quota - len(game.revealed)
         self._save_state()
-        return f"💡 线索：{value}（提示剩 {limit - len(game.revealed)} 次）"
+        return f"💡 线索：{value}（提示剩 {left} 次）"
 
     def _giveup_text(self, event: AstrMessageEvent) -> str:
         theme_key = self._current_theme(event)
@@ -1977,6 +2187,8 @@ class GuessProPlugin(Star):
         self._save_state()
         target = self.dbs[game.theme].get(game.target)
         head = "🏳️ 组队局结束" if game.is_team else "🏳️ 已放弃"
+        if game.is_bo3:
+            head += f"（第 {game.round_no} 局中断，比分 {self._bo3_score_text(game)}）"
         return f"{head}。答案：{game.target}\n" + (theme.card(target) if target else "")
 
     def _stats_text(self, event: AstrMessageEvent) -> str:
@@ -2120,6 +2332,10 @@ class GuessProPlugin(Star):
         else:
             lines.append("5. 组队：发「弗一把 双人」开房，别人发「加入」，凑齐自动开局")
             lines.append("   「多人」最多 6 人，房主发「开始」；答案和机会全队共用")
+            lines.append(
+                f"   双人局先手没提示、后手 {self._duel_hint()} 次；"
+                f"「{THEMES['cs'].command} 双人 bo3」打三局两胜"
+            )
         yield event.plain_result("\n".join(lines))
         event.stop_event()
 

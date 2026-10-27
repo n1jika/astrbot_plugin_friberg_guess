@@ -783,6 +783,105 @@ async def main() -> None:
     await tp4.on_message(ev_pm)
     check("群里" in _flatten(ev_pm.results[0]), "私聊不让开团")
 
+    print("[19] 双人 BO3：先手无提示 / 后手 2 次 / 三局两胜")
+    tp5 = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    G5 = "74000"
+    ev_bo3 = FakeEvent(text="弗一把 双人 bo3", group=G5, user="f1", name="阿明")
+    await tp5.on_message(ev_bo3)
+    room5 = tp5.games.get(m.SessionKey.team(G5, "cs"))
+    check(room5 is not None and room5.best_of == 3, "「弗一把 双人 bo3」建房并标记三局两胜")
+    check(
+        bool(ev_bo3.results) and "三局两胜" in _flatten(ev_bo3.results[0]),
+        "建房文案写明赛制",
+    )
+
+    await tp5.on_message(FakeEvent(text="加入", group=G5, user="g1", name="小红"))
+    check(room5 is not None and room5.started, "BO3 房凑齐两人自动开局")
+    check(room5 is not None and room5.round_no == 1 and room5.turn == 0, "第 1 局房主先手")
+
+    # 先手没提示
+    h_first = await run_commands(tp5.hint, FakeEvent(text="提示", group=G5, user="f1", name="阿明"))
+    body = _flatten(h_first[0]) if h_first else ""
+    check("先手" in body and "没有提示" in body, f"先手发提示被拒（{body[:18]}）")
+
+    # 后手 2 次
+    hb1 = await run_commands(tp5.hint, FakeEvent(text="提示", group=G5, user="g1", name="小红"))
+    check(bool(hb1) and "线索" in _flatten(hb1[0]), "后手拿到第 1 次提示")
+    hb2 = await run_commands(tp5.hint, FakeEvent(text="提示", group=G5, user="g1", name="小红"))
+    check(bool(hb2) and "线索" in _flatten(hb2[0]), "后手拿到第 2 次提示")
+    hb3 = await run_commands(tp5.hint, FakeEvent(text="提示", group=G5, user="g1", name="小红"))
+    check(bool(hb3) and "用完" in _flatten(hb3[0]), "后手第 3 次被挡下")
+
+    db5 = tp5.dbs["cs"]
+    # 第 1 局：先手猜中
+    txt1 = tp5._apply_guess(room5, db5.get(room5.target), "f1", "阿明")
+    check("第 2 局" in txt1, "猜中后进入第 2 局")
+    check(room5.round_no == 2 and int(room5.scores.get("f1", 0)) == 1, "比分 1:0")
+    check(room5.turn == 1, "第 2 局换成 小红 先手")
+    check(room5.key in tp5.games, "整场还没结束，房间保留")
+    check(not room5.guessed and not room5.hint_used, "新一局棋盘与提示额度都重置")
+
+    # 第 2 局：换先手后由 小红 猜中
+    txt2 = tp5._apply_guess(room5, db5.get(room5.target), "g1", "小红")
+    check("第 3 局" in txt2, "1:1 后进入决胜局")
+    check(int(room5.scores.get("g1", 0)) == 1, "比分 1:1")
+    check(room5.turn == 0, "第 3 局回到 阿明 先手")
+
+    # 第 3 局：阿明 拿下，2:1 收场
+    txt3 = tp5._apply_guess(room5, db5.get(room5.target), "f1", "阿明")
+    check("三局两胜打完了" in txt3 and "阿明" in txt3, "先到 2 胜宣布整场结果")
+    check(room5.key not in tp5.games, "整场结束房间关闭")
+    check(int(room5.scores.get("f1", 0)) == 2, "最终比分 2:1")
+
+    # 存档带上 BO3 进度
+    revived5 = m.Game.from_dict({**room5.to_dict(), "started": True})
+    check(
+        revived5.best_of == 3 and revived5.round_no == room5.round_no and revived5.scores == room5.scores,
+        "BO3 进度可存档恢复",
+    )
+
+    # 赛制只给双人
+    tp5b = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    ev_mb = FakeEvent(text="弗一把 多人 bo3", group="74100", user="h1", name="老王")
+    await tp5b.on_message(ev_mb)
+    check(bool(ev_mb.results) and "BO3" in _flatten(ev_mb.results[0]), "「多人 bo3」被拒")
+    ev_sb = FakeEvent(text="弗一把 bo3", group="74200", user="i1", name="路人")
+    await tp5b.on_message(ev_sb)
+    check(bool(ev_sb.results) and "双人" in _flatten(ev_sb.results[0]), "独猜带 bo3 提示走双人")
+
+    # 普通双人局同样按先后手分提示额度
+    tp6 = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    G6 = "74300"
+    await tp6.on_message(FakeEvent(text="弗一把 双人", group=G6, user="j1", name="甲"))
+    await tp6.on_message(FakeEvent(text="加入", group=G6, user="j2", name="乙"))
+    room6 = tp6.games.get(m.SessionKey.team(G6, "cs"))
+    check(room6 is not None and room6.best_of == 0, "不带 bo3 就是单局定胜负")
+    o6a = await run_commands(tp6.hint, FakeEvent(text="提示", group=G6, user="j1", name="甲"))
+    check(bool(o6a) and "没有提示" in _flatten(o6a[0]), "普通双人局先手也没提示")
+    o6b = await run_commands(tp6.hint, FakeEvent(text="提示", group=G6, user="j2", name="乙"))
+    check(bool(o6b) and "线索" in _flatten(o6b[0]), "普通双人局后手有提示")
+
+    # BO3 里一局谁都没猜中：本局作废不计分
+    tp7 = m.GuessProPlugin(_Context(), {"timeout_minutes": 0})
+    G7 = "74400"
+    await tp7.on_message(FakeEvent(text="弗一把 双人 bo3", group=G7, user="k1", name="甲"))
+    await tp7.on_message(FakeEvent(text="加入", group=G7, user="k2", name="乙"))
+    room7 = tp7.games.get(m.SessionKey.team(G7, "cs"))
+    db7 = tp7.dbs["cs"]
+    safe7 = [
+        m.THEMES["cs"].title_of(p)
+        for p in db7.players
+        if "（" not in m.THEMES["cs"].title_of(p) and m.THEMES["cs"].title_of(p) != room7.target
+    ]
+    turn7 = ("k1", "甲")
+    last7 = ""
+    for i in range(room7.attempts):
+        last7 = tp7._apply_guess(room7, db7.get(safe7[i]), turn7[0], turn7[1])
+        turn7 = ("k2", "乙") if turn7[0] == "k1" else ("k1", "甲")
+    check("没人猜中" in last7, "一局全错时判本局作废")
+    check(room7.key in tp7.games and room7.round_no == 2, "作废后照样进下一局")
+    check(not any(room7.scores.values()), "作废的一局不计分")
+
     print("\n全部自测通过 ✅")
     print("足球棋盘示例：\n" + m.render_board(fbt, 1, 10, haaland, rodri))
 
