@@ -1149,6 +1149,7 @@ class PlayerDB:
         self.alias_version = ""
         self.alias_report: dict[str, Any] = {"added": 0, "conflicts": [], "orphans": []}
         self.single_char_aliases: set[str] = set()
+        self._preferred: dict[str, dict] = {}  # 外号表显式点名的，优先于同名选手
         self.load()
 
     def load(self) -> None:
@@ -1219,6 +1220,7 @@ class PlayerDB:
             return
         self.alias_version = str(raw.get("version") or "") if isinstance(raw, dict) else ""
         self.single_char_aliases = set()
+        self._preferred = {}
         added, conflicts, orphans = 0, [], []
         for target, names in mapping.items():
             player = self._locate(target)
@@ -1237,7 +1239,8 @@ class PlayerDB:
                     if len(key) == 1:
                         self.single_char_aliases.add(key)
                 elif player in bucket:
-                    continue
+                    # 同一个名字对得上多人（niko 有波黑和丹麦两位）时，以外号表点名的为准
+                    self._preferred[key] = player
                 else:
                     conflicts.append(f"{alias}→{target}")
         if added or conflicts or orphans:
@@ -1263,7 +1266,11 @@ class PlayerDB:
             return "none", []
         exact = self._index.get(key)
         if exact:
-            return "exact", sorted(exact, key=self._prominence)[:5]
+            ordered = sorted(exact, key=self._prominence)
+            preferred = self._preferred.get(key)
+            if preferred is not None and any(p is preferred for p in ordered):
+                ordered = [preferred] + [p for p in ordered if p is not preferred]
+            return "exact", ordered[:5]
 
         starts, contains = [], []
         for player in self.players:
@@ -1280,6 +1287,10 @@ class PlayerDB:
 
     def find(self, query: str) -> list[dict]:
         return self.match(query)[1]
+
+    def preferred(self, query: str) -> dict | None:
+        """外号表显式点名的那个（比如 niko 指向波黑的 NiKo，而不是丹麦同名选手）。"""
+        return self._preferred.get(normalize_name(query))
 
     def answer_pool(self, name: str) -> list[dict]:
         """出题候选：去掉同名选手，保证答案能被唯一判定。"""
@@ -2276,6 +2287,10 @@ class GuessProPlugin(Star):
             if len(candidates) == 1:
                 return THEMES[key].card(candidates[0])
             if len(candidates) > 1:
+                # 外号表点过名的（niko → 波黑 NiKo）直接给卡，不再让人挑
+                pref = db.preferred(query)
+                if pref is not None and candidates[0] is pref:
+                    return THEMES[key].card(pref)
                 names = " / ".join(THEMES[key].title_of(p) for p in candidates)
                 return f"{THEMES[key].label}里找到多个：{names}，换个更精确的名字。"
         return f"没找到「{query}」，试试英文名或别的写法。"

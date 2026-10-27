@@ -80,12 +80,6 @@ REGION_FALLBACK = {
     "以色列": "非洲与以色列", "南非": "非洲与以色列",
 }
 
-ROLE_MAP = (
-    ("coach", "Coach"),
-    ("awp", "AWPer"),
-    # igl（in-game leader）是队内指挥，仍然是选手，不能算教练
-)
-
 DISAMBIG = re.compile(r"[（(]([^）)]+)[）)]\s*$")  # 原库给同名选手加的「adren（哈萨克斯坦）」后缀
 
 
@@ -294,13 +288,20 @@ def _team_history(text: str) -> list[str]:
 
 
 def _roles_to_role(roles: str) -> str | None:
-    """只有 Liquipedia 明确写了 awp / coach 才改，否则保持原库的角色。"""
+    """按 Liquipedia 信息框里的顺序取第一个认得的角色。
+
+    以前是「只要出现 awp 就算 AWPer」，结果 latto / dumau 这种同时标了
+    Rifler+AWPer 的人全被判成狙击手，一支队冒出三个 AWPer。改成看顺序：
+    页面把主角色写在前面，只有 awp 单独出现才算纯 AWPer。
+    """
     parts = [x.strip().lower() for x in roles.split(",") if x.strip()]
-    if not parts:
-        return None
-    for marker, mapped in ROLE_MAP:
-        if marker in parts:
-            return mapped
+    for part in parts:
+        if "coach" in part:
+            return "Coach"
+        if "awp" in part:
+            return "AWPer"
+        if "rifl" in part:
+            return "Rifler"
     return None
 
 

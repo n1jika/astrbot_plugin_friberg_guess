@@ -923,6 +923,22 @@ async def main() -> None:
     body = _flatten(ev_card.results[0]) if ev_card.results else ""
     check("ZywOo" in body, "图鉴也认外号")
 
+    hits2 = db8.find("小驴")
+    check(len(hits2) == 1 and m.THEMES["cs"].title_of(hits2[0]) == "donk", "「小驴」命中 donk")
+    nk = db8.find("niko")
+    check(
+        nk and m.THEMES["cs"].title_of(nk[0]) == "NiKo（波黑）",
+        "「niko」优先波黑 NiKo，不是丹麦同名选手",
+    )
+    ev_nk = FakeEvent(text="图鉴 niko", group=G8, user="l1", name="阿明")
+    await tp8.on_message(ev_nk)
+    body = _flatten(ev_nk.results[0]) if ev_nk.results else ""
+    check("NiKo" in body and "波黑" in body, "图鉴 niko 直接给波黑 NiKo 的卡")
+
+    legacy = [p for p in db8.players if p.get("team") == "Legacy"]
+    aps = [p["nickname"] for p in legacy if p.get("role") == "AWPer"]
+    check(aps == ["try"], f"Legacy 只剩一个 AWPer（{aps}）")
+
     print("\n全部自测通过 ✅")
     print("足球棋盘示例：\n" + m.render_board(fbt, 1, 10, haaland, rodri))
 
