@@ -3,7 +3,7 @@
 在 QQ 群里玩四种「猜选手」：CS:GO / CS2 Major 选手、足球球员、LoL 职业选手、瓦罗兰特职业选手。
 一套对局骨架（开局、计时、提示、战绩、排行、存档）配四个题库，各自按自己的属性格给反馈。
 
-仓库地址：<https://github.com/weadee/astrbot_plugin_friberg_guess>
+仓库地址：<https://github.com/n1jika/astrbot_plugin_friberg_guess>（fork 自 <https://github.com/weadee/astrbot_plugin_friberg_guess>）
 
 ## 四个题库
 
@@ -15,6 +15,8 @@
 | `瓦一把` | 瓦罗兰特选手 | 543 | 8 | 国籍 · 赛区 · 战队 · 身份 · 职责 · 年龄 · 大师赛参赛 · 大师赛冠军 · 冠军赛参赛 · 冠军赛冠军 |
 
 ## 玩法示例
+
+以下猜测反馈为图片生成失败时的文字形式；正常情况下显示整局图片棋盘。
 
 ```
 用户：足一把
@@ -39,7 +41,13 @@ Bot ：第 1/10 猜｜哈兰德
 
 `↑` / `↓` 表示**答案**比猜的这个数值更大 / 更小。
 
-### 棋盘排版
+### 图片棋盘
+
+每次有效猜测会生成一张包含本局全部猜测的图片。格子沿用各题库的判定：绿色一致、黄色接近、红色不符；数值箭头指向答案。独猜、组队和 BO3 均支持，每局的棋盘单独计算。结果、剩余次数和轮到谁仍以文字补充；重复猜测等提示仍为文字。
+
+新对局会保存每次判定快照。旧存档首次猜测时按当前题库重建历史；若历史选手已经从题库移除，该行会标记数据缺失。图片生成失败时回退为文字。
+
+### 原版文字棋盘排版
 
 **一行两项，放不下就这一项单独占一行。**
 
@@ -307,9 +315,7 @@ Bot ：本局你是先手，没有提示（后手有 2 次）。
 
 ## 安装
 
-想省事就直接下 Releases 里的安装包（zip 内已含插件目录，解压即用）：
-
-<https://github.com/weadee/astrbot_plugin_friberg_guess/releases/latest>
+本 fork 通过仓库地址安装；原仓库的 Release 不包含本 fork 的图片功能。
 
 手动安装：
 
@@ -320,10 +326,10 @@ Bot ：本局你是先手，没有提示（后手有 2 次）。
 也可以在 WebUI 插件页填仓库地址安装，后续能直接在面板里更新：
 
 ```
-https://github.com/weadee/astrbot_plugin_friberg_guess
+https://github.com/n1jika/astrbot_plugin_friberg_guess
 ```
 
-无第三方依赖，纯标准库（抓题数据用的脚本在仓库外，插件运行时不联网）。
+图片渲染依赖 Pillow（见 `requirements.txt`）；手动安装时请在 AstrBot 的 Python 环境执行 `pip install -r requirements.txt`。插件自带 Noto Sans SC 中文字体和 SIL OFL 授权文件，绘图无需联网。
 
 ## 配置项（`_conf_schema.json`）
 
