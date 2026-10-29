@@ -17,7 +17,7 @@ desc: >-
   大师赛/冠军赛战绩。次数用尽或超时公布答案。
 version: 1.10.4
 author: weadee
-repo: https://github.com/n1jika/astrbot_plugin_friberg_guess
+repo: https://github.com/weadee/astrbot_plugin_friberg_guess
 astrbot_version: ">=4.9.2"
 support_platforms:
   - aiocqhttp

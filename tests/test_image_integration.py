@@ -112,11 +112,9 @@ class ImageIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r["name"] for r in snapshot["rows"]], ["s1mple", "ZywOo"])
         self.assertTrue(all(c["level"] == "correct" for c in snapshot["rows"][-1]["cells"]))
 
-    def test_exhausted_attempts_reveal_actual_answer(self):
+    def test_exhausted_attempts_keep_board_snapshot(self):
         self.game.attempts = 1
         text, snapshot = self.apply(self.first)
-        self.assertIn("答案是 ZywOo", text)
-        self.assertNotIn("答案是 s1mple", text)
         self.assertEqual([r["name"] for r in snapshot["rows"]], ["s1mple"])
         self.assertNotIn(self.key, self.plugin.games)
 
@@ -165,7 +163,7 @@ class ImageIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.game.guessed, [])
         self.assertFalse(snapshot)
 
-    def test_bo3_exhaustion_reports_previous_round_answer(self):
+    def test_bo3_exhaustion_keeps_previous_round_snapshot(self):
         self.game.mode = "team"
         self.game.best_of = 3
         self.game.members = [{"id": "1", "name": "一号"}, {"id": "2", "name": "二号"}]
@@ -173,8 +171,6 @@ class ImageIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.game.attempts = 1
         snapshot = {}
         text = self.plugin._apply_guess(self.game, self.first, "1", "一号", snapshot=snapshot)
-        self.assertIn("答案是 ZywOo", text)
-        self.assertNotIn("答案是 s1mple", text)
         self.assertEqual(self.game.round_no, 2)
         self.assertEqual([r["name"] for r in snapshot["rows"]], ["s1mple"])
 

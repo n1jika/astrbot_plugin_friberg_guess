@@ -3,7 +3,7 @@
 在 QQ 群里玩四种「猜选手」：CS:GO / CS2 Major 选手、足球球员、LoL 职业选手、瓦罗兰特职业选手。
 一套对局骨架（开局、计时、提示、战绩、排行、存档）配四个题库，各自按自己的属性格给反馈。
 
-仓库地址：<https://github.com/n1jika/astrbot_plugin_friberg_guess>（fork 自 <https://github.com/weadee/astrbot_plugin_friberg_guess>）
+仓库地址：<https://github.com/weadee/astrbot_plugin_friberg_guess>
 
 ## 四个题库
 
@@ -315,7 +315,9 @@ Bot ：本局你是先手，没有提示（后手有 2 次）。
 
 ## 安装
 
-本 fork 通过仓库地址安装；原仓库的 Release 不包含本 fork 的图片功能。
+想省事就直接下 Releases 里的安装包（zip 内已含插件目录，解压即用）：
+
+<https://github.com/weadee/astrbot_plugin_friberg_guess/releases/latest>
 
 手动安装：
 
@@ -326,7 +328,7 @@ Bot ：本局你是先手，没有提示（后手有 2 次）。
 也可以在 WebUI 插件页填仓库地址安装，后续能直接在面板里更新：
 
 ```
-https://github.com/n1jika/astrbot_plugin_friberg_guess
+https://github.com/weadee/astrbot_plugin_friberg_guess
 ```
 
 图片渲染依赖 Pillow（见 `requirements.txt`）；手动安装时请在 AstrBot 的 Python 环境执行 `pip install -r requirements.txt`。插件自带 Noto Sans SC 中文字体和 SIL OFL 授权文件，绘图无需联网。

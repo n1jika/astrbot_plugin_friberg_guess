@@ -2194,7 +2194,7 @@ class GuessProPlugin(Star):
 
         if len(game.guessed) >= game.attempts:
             if game.is_bo3:
-                return self._bo3_round_end(game, theme, board, game.target, target)
+                return self._bo3_round_end(game, theme, board, title, target)
             self.games.pop(game.key, None)
             if game.task:
                 game.task.cancel()
@@ -2202,11 +2202,11 @@ class GuessProPlugin(Star):
             self._save_state()
             if game.is_team:
                 return (
-                    f"{board}\n\n💀 {game.attempts} 次机会用完了，答案是 {game.target}\n{theme.card(target)}\n"
+                    f"{board}\n\n💀 {game.attempts} 次机会用完了，答案是 {title}\n{theme.card(target)}\n"
                     f"全队都没猜出来，发「{theme.command} 多人」再来一局。"
                 )
             return (
-                f"{board}\n\n💀 {game.attempts} 次机会用完了，答案是 {game.target}\n{theme.card(target)}\n"
+                f"{board}\n\n💀 {game.attempts} 次机会用完了，答案是 {title}\n{theme.card(target)}\n"
                 f"发送「{theme.command}」再来一局。"
             )
 
