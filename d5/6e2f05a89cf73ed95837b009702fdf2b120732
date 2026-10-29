@@ -1,0 +1,51 @@
+README.md
+  s_0db4b846649db1::t_a9e6efd74ab5a3 44-50,329,332
+  s_0db4b846649db1::t_751d5cbbbb0e4a 6,19-20,318
+image_renderer.py
+  s_2cb097ac672814::t_361a9a1e435772 1-19,21-39,49-64,71-82,88-135
+  s_2cb097ac672814::t_b822d8c37b3285 40-48,65-70,83-87
+  s_2cb097ac672814::t_7bddfa93060195 20
+tests/test_image_renderer.py
+  s_0db4b846649db1::t_751d5cbbbb0e4a 31
+  s_0db4b846649db1::t_8a313e4e30d130 1-30,32-47
+tests/test_image_integration.py
+  s_2cb097ac672814::t_cf3eb0b6487bd0 1-10,12-36,46-103,112-136,143-146,165-168
+  s_2cb097ac672814::t_3dd6b2b54709b5 11,37-45,104-111,137-142,147-164
+main.py
+  s_0db4b846649db1::t_a9e6efd74ab5a3 2552-2555
+  s_2cb097ac672814::t_7bddfa93060195 27,1333,1374,1403,2030,2133-2134,2153-2165,2168,2170-2177,2197,2205,2209,2535-2536,2538-2540,2542,2544-2551,2556-2557
+tests/selftest.py
+  s_2cb097ac672814::t_7bddfa93060195 100
+tools/pack_release.py
+  s_2cb097ac672814::t_7bddfa93060195 33,35
+metadata.yaml
+  s_0db4b846649db1::t_751d5cbbbb0e4a 20
+requirements.txt
+  s_2cb097ac672814::t_7bddfa93060195 1
+assets/OFL-NotoSansSC.txt
+  s_0db4b846649db1::t_e7a1aa5850633a 1-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d56e2f05a89cf73ed95837b009702fdf2b120732",
+  "prompts": {},
+  "sessions": {
+    "s_0db4b846649db1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a18697-6680-74b3-aa13-42463c01e032",
+        "model": "unknown"
+      },
+      "human_author": "fangyanqi.1 <fangyanqi.1@jd.com>"
+    },
+    "s_2cb097ac672814": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18697-6680-74b3-aa13-42463c01e032",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "fangyanqi.1 <fangyanqi.1@jd.com>"
+    }
+  }
+}
